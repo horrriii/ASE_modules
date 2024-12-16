@@ -37,7 +37,7 @@ def bulk(name, crystalstructure=None, a=None, b=None, c=None, *, alpha=None,
     covera: float
         c/a ratio used for hcp.  Default is ideal ratio: sqrt(8/3).
     u: float
-        Internal coordinate for Wurtzite structure.
+        Internal coordinate for Wurtzite or Pyrite structure.
     orthorhombic: bool
         Construct orthorhombic unit cell instead of primitive cell
         which is the default.
@@ -206,9 +206,9 @@ def bulk(name, crystalstructure=None, a=None, b=None, c=None, *, alpha=None,
         u = u or 0.1
         symbol1, symbol2, symbol3 = string2symbols(name)
         atoms = bulk(symbol1, 'fcc', a, cubic=True)
-        positions=atoms.get_positions()
-        positions[0] += atoms.cell.cellpar()[0:3]
-        atoms.set_positions(positions)
+        # positions=atoms.get_positions()
+        # positions[0] += atoms.cell.cellpar()[0:3]
+        # atoms.set_positions(positions)
         dimer1=Atoms([symbol2, symbol3],scaled_positions=[(u, 0.5+u, 1-u),(1-u, 0.5-u, u)],cell=(a, a, a), pbc=True)
         dimer2=Atoms([symbol3, symbol2],scaled_positions=[(0.5+u, 0.5+u, 0.5+u),(0.5-u, 0.5-u, 0.5-u)],cell=(a, a, a), pbc=True)
         dimer3=Atoms([symbol3, symbol2],scaled_positions=[(u, 1-u, 0.5-u),(1-u, u, 0.5+u)],cell=(a, a, a), pbc=True)
