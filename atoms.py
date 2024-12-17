@@ -64,6 +64,9 @@ class Atoms:
         non-collinear calculations.
     charges: list of float
         Initial atomic charges.
+    solute_lj: list of int
+    solute_epsilon: list of float
+    solute_sigma: list of float
     cell: 3x3 matrix or length 3 or 6 vector
         Unit cell vectors.  Can also be given as just three
         numbers for orthorhombic cells, or 6 numbers, where
@@ -137,7 +140,10 @@ class Atoms:
                  constraint=None,
                  calculator=None,
                  info=None,
-                 velocities=None):
+                 velocities=None,
+                 solute_lj=None,
+                 solute_epsilon=None,
+                 solute_sigma=None):
 
         self._cellobj = Cell.new()
         self._pbc = np.zeros(3, bool)
@@ -656,6 +662,52 @@ class Atoms:
         if self._calc is None:
             raise RuntimeError('Atoms object has no calculator.')
         return self._calc.get_magnetic_moment(self)
+
+# from this line script made by Hori.
+
+    def set_solute_lj(self, solute_ljs=None):
+        """Set the Solute_lj"""
+
+        solute_ljs=np.asarray(solute_ljs)
+        self.set_array('Solute_ljs', solute_ljs, str,
+                           solute_ljs.shape[1:])
+    
+    def get_solute_ljs(self):
+        """Get the Solute_lj"""
+        if 'Solute_ljs' in self.arrays:
+            return self.arrays['Solute_ljs'].copy()
+        else:
+            return np.zeros(len(self))
+
+    def set_solute_epsilon(self, solute_epsilons=None):
+        """Set the Solute_lj"""
+
+        solute_epsilons=np.asarray(solute_epsilons)
+        self.set_array('Solute_epsilons', solute_epsilons, float,
+                           solute_epsilons.shape[1:])
+    
+    def get_solute_epsilons(self):
+        """Get the Solute_epsilon"""
+        if 'Solute_epsilons' in self.arrays:
+            return self.arrays['Solute_epsilons'].copy()
+        else:
+            return np.zeros(len(self))
+
+    def set_solute_sigma(self, solute_sigmas=None):
+        """Set the Solute_sigma"""
+
+        solute_sigmas=np.asarray(solute_sigmas)
+        self.set_array('Solute_sigmas', solute_sigmas, float,
+                           solute_sigmas.shape[1:])
+    
+    def get_solute_sigmas(self):
+        """Get the Solute_sigma"""
+        if 'Solute_sigmas' in self.arrays:
+            return self.arrays['Solute_sigmas'].copy()
+        else:
+            return np.zeros(len(self))
+
+# until this line.
 
     def set_initial_charges(self, charges=None):
         """Set the initial charges."""

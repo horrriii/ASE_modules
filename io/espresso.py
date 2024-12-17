@@ -1224,11 +1224,11 @@ KEYS = Namelist((
         'nstep', 'iprint', 'tstress', 'tprnfor', 'dt', 'outdir', 'wfcdir',
         'prefix', 'lkpoint_dir', 'max_seconds', 'etot_conv_thr',
         'forc_conv_thr', 'disk_io', 'pseudo_dir', 'tefield', 'dipfield',
-        'lelfield', 'nberrycyc', 'lorbm', 'lberry', 'gdir', 'nppstr',
-        'lfcpopt', 'monopole']),
+        'lelfield', 'nberrycyc', 'lorbm', 'lberry', 'gdir', 'nppstr', 'gate'
+        'twochem', 'trism']),
     ('SYSTEM', [
         'ibrav', 'celldm', 'A', 'B', 'C', 'cosAB', 'cosAC', 'cosBC', 'nat',
-        'ntyp', 'nbnd', 'tot_charge', 'tot_magnetization',
+        'ntyp', 'nbnd', 'nbnd_cond', 'tot_charge', 'tot_magnetization',
         'starting_magnetization', 'ecutwfc', 'ecutrho', 'ecutfock', 'nr1',
         'nr2', 'nr3', 'nr1s', 'nr2s', 'nr3s', 'nosym', 'nosym_evc', 'noinv',
         'no_t_rev', 'force_symmorphic', 'use_all_frac', 'occupations',
@@ -1262,7 +1262,19 @@ KEYS = Namelist((
         'w_2']),
     ('CELL', [
         'cell_dynamics', 'press', 'wmass', 'cell_factor', 'press_conv_thr',
-        'cell_dofree'])))
+        'cell_dofree']),
+    ('RISM', [
+        'nsolv', 'closure', 'tempv', 'ecutsolv',
+        'solute_lj', 'solute_epsilon', 'solute_sigma', 'starting1d',
+        'starting3d', 'smear1d', 'smear3d', 'rism1d_maxstep',
+        'rism3d_maxstep', 'rism1d_conv_thr', 'rism3d_conv_thr',
+        'mdiis1d_size', 'mdiis3d_size', 'mdiis1d_step', 'mdiis3d_step',
+        'rism1d_bond_width', 'rism1d_dielectric', 'rism1d_molesize',
+        'rism1d_nproc', 'rism3d_conv_level', 'rism3d_planar_average',
+        'laue_nfit', 'laue_expand_right', 'laue_expand_left', 'laue_starting_right',
+        'laue_starting_left', 'laue_buffer_right', 'laue_buffer_left',
+        'laue_both_hands', 'laue_wall', 'laue_wall_z', 'laue_wall_rho',
+        'laue_wall_epsilon', 'laue_wall_sigma', 'laue_wall_lj6'])))
 
 
 # Number of valence electrons in the pseudopotentials recommended by
@@ -1741,6 +1753,50 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
                 '{atom.symbol} '
                 '{coords[0]:.10f} {coords[1]:.10f} {coords[2]:.10f} '
                 '{mask}\n'.format(atom=atom, coords=coords, mask=mask))
+
+# from this line script made by Hori.
+    siax=1
+    if any(atoms.get_solute_ljs()):
+        for atom, solute_lj in zip(atoms, atoms.get_solute_ljs()):
+            if (atom.symbol, solute_lj) not in atomic_species:
+                tiax = sum(atom.symbol == x[0] for x in atomic_species) or ' '
+                atomic_species[(atom.symbol, solute_lj)] = (siax, tiax)
+                # Add solute_lj to the input parameter
+                solute_lj_str = 'solute_lj({0})'.format(siax)
+                input_parameters['rism'][solute_lj_str] = str(solute_lj)
+                siax += 1
+    else:
+        pass
+
+# solute_epsilonとsolute_sigmaの値が同じ場合は、solute_epsilonしか出力されないため注意。
+
+    sibx=1
+    if any(atoms.get_solute_epsilons()):
+        for atom, solute_epsilon in zip(atoms, atoms.get_solute_epsilons()):
+            if (atom.symbol, solute_epsilon) not in atomic_species:
+                tibx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
+                atomic_species[(atom.symbol, solute_epsilon)] = (sibx, tibx)
+                # Add solute_lj to the input parameter
+                solute_epsilon_str = 'solute_epsilon({0})'.format(sibx)
+                input_parameters['rism'][solute_epsilon_str] = float(solute_epsilon)
+                sibx += 1
+    else:
+        pass
+
+    sicx=1
+    if any(atoms.get_solute_sigmas()):
+        for atom, solute_sigma in zip(atoms, atoms.get_solute_sigmas()):
+            if (atom.symbol, solute_sigma) not in atomic_species:
+                ticx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
+                atomic_species[(atom.symbol, solute_sigma)] = (sicx, ticx)
+                # Add solute_lj to the input parameter
+                solute_sigma_str = 'solute_sigma({0})'.format(sicx)
+                input_parameters['rism'][solute_sigma_str] = float(solute_sigma)
+                sicx += 1
+    else:
+        pass
+
+# until this line.
 
     # Add computed parameters
     # different magnetisms means different types
