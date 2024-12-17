@@ -1575,7 +1575,7 @@ def kspacing_to_grid(atoms, spacing, calculated_spacing=None):
 def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
                       kspacing=None, kpts=None, koffset=(0, 0, 0),
                       crystal_coordinates=False, additional_cards=None,
-                      **kwargs):
+                      solvents=None, **kwargs):
     """
     Create an input file for pw.x.
 
@@ -1754,7 +1754,7 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
                 '{coords[0]:.10f} {coords[1]:.10f} {coords[2]:.10f} '
                 '{mask}\n'.format(atom=atom, coords=coords, mask=mask))
 
-# from this line script made by Hori.
+    # from this line script made by Hori.
     siax=1
     if any(atoms.get_solute_ljs()):
         for atom, solute_lj in zip(atoms, atoms.get_solute_ljs()):
@@ -1768,7 +1768,7 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
     else:
         pass
 
-# solute_epsilonとsolute_sigmaの値が同じ場合は、solute_epsilonしか出力されないため注意。
+    # solute_epsilonとsolute_sigmaの値で同じ物がある場合は、solute_epsilonしか出力されないため注意。
 
     sibx=1
     if any(atoms.get_solute_epsilons()):
@@ -1795,8 +1795,7 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
                 sicx += 1
     else:
         pass
-
-# until this line.
+    # until this line.
 
     # Add computed parameters
     # different magnetisms means different types
@@ -1839,6 +1838,15 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
     pwi.append('ATOMIC_SPECIES\n')
     pwi.extend(atomic_species_str)
     pwi.append('\n')
+
+    # Solvents for the calculation of ESM-RISM
+    if isinstance(solvents, list):
+        pwi.append('SOLVENTS mol/L\n')
+        for i in range(len(solvents)):
+            pwi.append('{species} {mol_L} {mol_file}\n'.format(
+                            species=solvents[i]['species'], mol_L=solvents[i]['mol_L'],
+                            mol_file=solvents[i]['mol_file']))
+        pwi.append('\n')
 
     # KPOINTS - add a MP grid as required
     if kspacing is not None:
@@ -1893,6 +1901,7 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
         pwi.append('ATOMIC_POSITIONS angstrom\n')
     pwi.extend(atomic_positions_str)
     pwi.append('\n')
+    
 
     # DONE!
     fd.write(''.join(pwi))
