@@ -1754,7 +1754,12 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
                 '{coords[0]:.10f} {coords[1]:.10f} {coords[2]:.10f} '
                 '{mask}\n'.format(atom=atom, coords=coords, mask=mask))
 
-    # from this line script made by Hori.
+    # Add computed parameters
+    # different magnetisms means different types
+    input_parameters['system']['ntyp'] = len(atomic_species)
+    input_parameters['system']['nat'] = len(atoms)
+
+    # from this line, script made by Hori.
     siax=1
     if any(atoms.get_solute_ljs()):
         for atom, solute_lj in zip(atoms, atoms.get_solute_ljs()):
@@ -1796,11 +1801,6 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
     else:
         pass
     # until this line.
-
-    # Add computed parameters
-    # different magnetisms means different types
-    input_parameters['system']['ntyp'] = len(atomic_species)
-    input_parameters['system']['nat'] = len(atoms)
 
     # Use cell as given or fit to a specific ibrav
     if 'ibrav' in input_parameters['system']:
