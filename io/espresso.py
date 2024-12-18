@@ -1902,7 +1902,6 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
     pwi.extend(atomic_positions_str)
     pwi.append('\n')
     
-
     # DONE!
     fd.write(''.join(pwi))
     

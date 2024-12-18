@@ -3,6 +3,8 @@
 export ASE_ESPRESSO_COMMAND="/path/to/pw.x -in PREFIX.pwi > PREFIX.pwo"
 
 Run pw.x jobs.
+
+I wanna rewrite this script to do calculation of ESM-RISM.
 """
 
 
