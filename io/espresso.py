@@ -1759,7 +1759,7 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
     input_parameters['system']['ntyp'] = len(atomic_species)
     input_parameters['system']['nat'] = len(atoms)
 
-    # from this line, script made by Hori.
+# from this line, script made by Hori.
     siax=1
     if any(atoms.get_solute_ljs()):
         for atom, solute_lj in zip(atoms, atoms.get_solute_ljs()):
@@ -1773,34 +1773,62 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
     else:
         pass
 
-    # solute_epsilonとsolute_sigmaの値で同じ物がある場合は、solute_epsilonしか出力されないため注意。
+# solute_epsilonとsolute_sigmaの値が同じ場合は、solute_epsilonしか出力されないため注意。
+# solute_epsilonとsolute_sigmaのNoneを識別するために'3.141592'と'2.718281'を使用。実際の値として使用しない。
+
 
     sibx=1
     if any(atoms.get_solute_epsilons()):
-        for atom, solute_epsilon in zip(atoms, atoms.get_solute_epsilons()):
+        check_epsilon=[]
+        for j in atoms.get_solute_epsilons():
+            if np.isnan(j):
+                check_epsilon.append(3.141592)
+            else:
+                check_epsilon.append(j)
+        
+        for atom, solute_epsilon in zip(atoms, np.array(check_epsilon)):
             if (atom.symbol, solute_epsilon) not in atomic_species:
-                tibx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
-                atomic_species[(atom.symbol, solute_epsilon)] = (sibx, tibx)
-                # Add solute_lj to the input parameter
-                solute_epsilon_str = 'solute_epsilon({0})'.format(sibx)
-                input_parameters['rism'][solute_epsilon_str] = float(solute_epsilon)
-                sibx += 1
+                if solute_epsilon == 3.141592:
+                    tibx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
+                    atomic_species[(atom.symbol, solute_epsilon)] = (sibx, tibx)
+                    sibx += 1
+                else:
+                    tibx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
+                    atomic_species[(atom.symbol, solute_epsilon)] = (sibx, tibx)
+                    # Add solute_epsilon to the input parameter
+                    solute_epsilon_str = 'solute_epsilon({0})'.format(sibx)
+                    input_parameters['rism'][solute_epsilon_str] = float(solute_epsilon)
+                    sibx += 1
     else:
         pass
 
     sicx=1
     if any(atoms.get_solute_sigmas()):
-        for atom, solute_sigma in zip(atoms, atoms.get_solute_sigmas()):
+        check_sigma=[]
+        for j in atoms.get_solute_sigmas():
+            if np.isnan(j):
+                check_sigma.append(2.718281)
+            else:
+                check_sigma.append(j)
+        
+        for atom, solute_sigma in zip(atoms, np.array(check_sigma)):
             if (atom.symbol, solute_sigma) not in atomic_species:
-                ticx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
-                atomic_species[(atom.symbol, solute_sigma)] = (sicx, ticx)
-                # Add solute_lj to the input parameter
-                solute_sigma_str = 'solute_sigma({0})'.format(sicx)
-                input_parameters['rism'][solute_sigma_str] = float(solute_sigma)
-                sicx += 1
+                if solute_sigma == 2.718281:
+                    ticx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
+                    atomic_species[(atom.symbol, solute_sigma)] = (sicx, ticx)
+                    sicx += 1
+                
+                else:
+                    ticx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
+                    atomic_species[(atom.symbol, solute_sigma)] = (sicx, ticx)
+                    # Add solute_sigma to the input parameter
+                    solute_sigma_str = 'solute_sigma({0})'.format(sicx)
+                    input_parameters['rism'][solute_sigma_str] = float(solute_sigma)
+                    sicx += 1
     else:
         pass
-    # until this line.
+
+# until this line.
 
     # Use cell as given or fit to a specific ibrav
     if 'ibrav' in input_parameters['system']:
