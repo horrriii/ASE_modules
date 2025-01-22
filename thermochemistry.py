@@ -433,30 +433,40 @@ class IdealGasThermo(ThermoChem):
     """
 
     def __init__(self, vib_energies, geometry, potentialenergy=0.,
-                 atoms=None, symmetrynumber=None, spin=None, natoms=None):
+                 atoms=None, symmetrynumber=None, spin=None, natoms=None,
+                 ignore_imag_modes=False):
         self.potentialenergy = potentialenergy
         self.geometry = geometry
         self.atoms = atoms
         self.sigma = symmetrynumber
         self.spin = spin
-        if natoms is None:
-            if atoms:
-                natoms = len(atoms)
+        self.ignore_imag_modes = ignore_imag_modes
+        if natoms is None and atoms:
+            natoms = len(atoms)
+        self.natoms = natoms
+
+        # Sort the vibrations
+        vib_energies = list(vib_energies)
+        vib_energies.sort(key=np.abs)
+
         # Cut the vibrations to those needed from the geometry.
         if natoms:
             if geometry == 'nonlinear':
-                self.vib_energies = vib_energies[-(3 * natoms - 6):]
+                vib_energies = vib_energies[-(3 * natoms - 6):]
             elif geometry == 'linear':
-                self.vib_energies = vib_energies[-(3 * natoms - 5):]
+                vib_energies = vib_energies[-(3 * natoms - 5):]
             elif geometry == 'monatomic':
-                self.vib_energies = []
-        else:
-            self.vib_energies = vib_energies
-        # Make sure no imaginary frequencies remain.
-        if sum(np.iscomplex(self.vib_energies)):
-            raise ValueError('Imaginary frequencies are present.')
-        else:
-            self.vib_energies = np.real(self.vib_energies)  # clear +0.j
+                vib_energies = []
+            else:
+                raise ValueError(f"Unsupported geometry: {geometry}")
+
+        # Check for imaginary frequencies.
+        vib_energies, n_imag = _clean_vib_energies(
+            vib_energies, ignore_imag_modes=ignore_imag_modes
+        )
+        self.vib_energies = vib_energies
+        self.n_imag = n_imag
+
         self.referencepressure = 1.0e5  # Pa
 
     def get_enthalpy(self, temperature, verbose=True):
