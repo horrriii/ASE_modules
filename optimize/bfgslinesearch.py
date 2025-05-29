@@ -24,7 +24,7 @@ __version__ = '0.1'
 class BFGSLineSearch(Optimizer):
     def __init__(self, atoms, restart=None, logfile='-', maxstep=None,
                  trajectory=None, c1=0.23, c2=0.46, alpha=10.0, stpmax=50.0,
-                 master=None, append_trajectory=False, force_consistent=None):
+                 master=None, force_consistent=None):
         """Optimize atomic positions in the BFGSLineSearch algorithm, which
         uses both forces and potential energy information.
 
@@ -52,9 +52,6 @@ class BFGSLineSearch(Optimizer):
         master: boolean
             Defaults to None, which causes only rank 0 to save files.  If
             set to true,  this rank will save files.
-            
-        append_trajectory: boolean
-            Appended to the trajectory file instead of overwriting it.
 
         force_consistent: boolean or None
             Use force-consistent energy calls (as opposed to the energy
@@ -85,8 +82,7 @@ class BFGSLineSearch(Optimizer):
         self.replay = False
 
         Optimizer.__init__(self, atoms, restart, logfile, trajectory,
-                           master, append_trajectory=append_trajectory,
-                           force_consistent=force_consistent)
+                           master, force_consistent=force_consistent)
 
     def read(self):
         self.r0, self.g0, self.e0, self.task, self.H = self.load()
@@ -120,7 +116,7 @@ class BFGSLineSearch(Optimizer):
         self.p = -np.dot(self.H, g)
         p_size = np.sqrt((self.p**2).sum())
         if p_size <= np.sqrt(len(atoms) * 1e-10):
-            self.p /= (p_size / np.sqrt(len(atoms)*1e-10))
+            self.p /= (p_size / np.sqrt(len(atoms) * 1e-10))
         ls = LineSearch()
         self.alpha_k, e, self.e0, self.no_update = \
             ls._line_search(self.func, self.fprime, r, self.p, g, e, self.e0,
@@ -219,7 +215,7 @@ class BFGSLineSearch(Optimizer):
         w = self.logfile.write
         if self.nsteps == 0:
             w('%s  %4s[%3s] %8s %15s  %12s\n' %
-              (' '*len(name), 'Step', 'FC', 'Time', 'Energy', 'fmax'))
+              (' ' * len(name), 'Step', 'FC', 'Time', 'Energy', 'fmax'))
             if self.force_consistent:
                 w('*Force-consistent energies used in optimization.\n')
         w('%s:  %3d[%3d] %02d:%02d:%02d %15.6f%1s %12.4f\n'

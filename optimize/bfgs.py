@@ -11,8 +11,7 @@ class BFGS(Optimizer):
     defaults = {**Optimizer.defaults, 'alpha': 70.0}
 
     def __init__(self, atoms, restart=None, logfile='-', trajectory=None,
-                 maxstep=None, master=None, alpha=None, 
-                 append_trajectory=False):
+                 maxstep=None, master=None, alpha=None):
         """BFGS optimizer.
 
         Parameters:
@@ -45,9 +44,6 @@ class BFGS(Optimizer):
             conservative value of 70.0 is the default, but number of needed
             steps to converge might be less if a lower value is used. However,
             a lower value also means risk of instability.
-
-        append_trajectory: boolean
-            Appended to the trajectory file instead of overwriting it.
         """
         if maxstep is None:
             self.maxstep = self.defaults['maxstep']
@@ -63,14 +59,7 @@ class BFGS(Optimizer):
         else:
             self.alpha = alpha
 
-        Optimizer.__init__(self, atoms, restart, logfile, trajectory, master,
-                           append_trajectory=append_trajectory)
-
-    def todict(self):
-        d = Optimizer.todict(self)
-        if hasattr(self, 'maxstep'):
-            d.update(maxstep=self.maxstep)
-        return d
+        Optimizer.__init__(self, atoms, restart, logfile, trajectory, master)
 
     def initialize(self):
         # initial hessian

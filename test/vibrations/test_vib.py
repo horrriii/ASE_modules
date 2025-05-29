@@ -9,11 +9,13 @@ import ase.io
 from ase.calculators.qmmm import ForceConstantCalculator
 from ase.vibrations import Vibrations, VibrationsData
 from ase.thermochemistry import IdealGasThermo
+from ase.constraints import FixAtoms, FixCartesian
 
 
 class TestHarmonicVibrations:
     """Test the ase.vibrations.Vibrations object using a harmonic calculator
     """
+
     def setup(self):
         self.logfile = 'vibrations-log.txt'
 
@@ -21,10 +23,10 @@ class TestHarmonicVibrations:
     def random_dimer(self):
         rng = np.random.RandomState(42)
 
-        d = 1 + 0.5 * rng.rand()
+        d = 1 + 0.5 * rng.random()
         z_values = rng.randint(1, high=50, size=2)
 
-        hessian = rng.rand(6, 6)
+        hessian = rng.random((6, 6))
         hessian += hessian.T  # Ensure the random Hessian is symmetric
 
         atoms = Atoms(z_values, [[0, 0, 0], [0, 0, d]])
@@ -38,7 +40,7 @@ class TestHarmonicVibrations:
         """Check the numerics with a trivial case: one atom in harmonic well"""
         rng = np.random.RandomState(42)
 
-        k = rng.rand()
+        k = rng.random()
 
         ref_atoms = Atoms('H', positions=np.zeros([1, 3]))
         atoms = ref_atoms.copy()
@@ -193,6 +195,19 @@ class TestVibrationsDataStaticMethods:
     def test_indices_from_mask(self, mask, expected_indices):
         assert VibrationsData.indices_from_mask(mask) == expected_indices
 
+    @pytest.mark.parametrize('fixed_indices,expected_indices',
+                             [(2, [0, 1, 3, 4]),
+                              ([0, 1, 2, 3, 4], []),
+                              ([], [0, 1, 2, 3, 4]),
+                              ([0, 1], [2, 3, 4])])
+    def test_indices_from_constraint(self, fixed_indices, expected_indices):
+        atoms = Atoms('CH4', constraint=FixAtoms(fixed_indices))
+        cartesian = Atoms('CH4', constraint=FixCartesian(fixed_indices))
+        assert VibrationsData.indices_from_constraints(
+            atoms) == expected_indices
+        assert VibrationsData.indices_from_constraints(
+            cartesian) == expected_indices
+
     def test_tabulate_energies(self):
         # Test the private classmethod _tabulate_from_energies
         # used by public tabulate() method
@@ -257,10 +272,10 @@ class TestVibrationsData:
     def random_dimer(self):
         rng = np.random.RandomState(42)
 
-        d = 1 + 0.5 * rng.rand()
+        d = 1 + 0.5 * rng.random()
         z_values = rng.randint(1, high=50, size=2)
 
-        hessian = rng.rand(6, 6)
+        hessian = rng.random((6, 6))
         hessian += hessian.T  # Ensure the random Hessian is symmetric
 
         atoms = Atoms(z_values, [[0, 0, 0], [0, 0, d]])
@@ -392,6 +407,14 @@ class TestVibrationsData:
         assert vib_data.get_indices() == [1, ]
         assert vib_data.get_mask().tolist() == [False, True]
 
+    def test_constrained_atoms(self, n2_data):
+        tmpAtoms = n2_data['atoms'].copy()
+        tmpAtoms.set_constraint(FixAtoms(0))
+        vib_data = VibrationsData(tmpAtoms,
+                                  n2_data['hessian'][1:, :, 1:, :])
+        assert vib_data.get_indices() == [1, ]
+        assert vib_data.get_mask().tolist() == [False, True]
+
     def test_dos(self, n2_vibdata):
         with pytest.warns(np.ComplexWarning):
             dos = n2_vibdata.get_dos()
@@ -487,6 +510,7 @@ class TestVibrationsData:
 
 class TestSlab:
     "N2 above Ag slab - vibration with frozen molecules"
+
     def test_vibration_on_surface(self, testdir):
         from ase.build import fcc111, add_adsorbate
         ag_slab = fcc111('Ag', (4, 4, 2), a=2)
@@ -524,4 +548,4 @@ class TestSlab:
             assert_array_almost_equal(vibs.get_mode(i)[0], [0., 0., 0.])
 
             # The N atoms should have finite displacement
-            assert np.all(vibs.get_mode(i)[-2:, :])
+            assert np.all(np.any(vibs.get_mode(i)[-2:, :], axis=1))

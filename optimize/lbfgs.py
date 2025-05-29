@@ -12,10 +12,11 @@ class LBFGS(Optimizer):
     Hessian is represented only as a diagonal matrix to save memory
 
     """
+
     def __init__(self, atoms, restart=None, logfile='-', trajectory=None,
                  maxstep=None, memory=100, damping=1.0, alpha=70.0,
                  use_line_search=False, master=None,
-                 append_trajectory=False, force_consistent=None):
+                 force_consistent=None):
         """Parameters:
 
         atoms: Atoms object
@@ -56,9 +57,6 @@ class LBFGS(Optimizer):
             Defaults to None, which causes only rank 0 to save files.  If
             set to true,  this rank will save files.
 
-        append_trajectory: boolean
-            Appended to the trajectory file instead of overwriting it.
-
         force_consistent: boolean or None
             Use force-consistent energy calls (as opposed to the energy
             extrapolated to 0 K).  By default (force_consistent=None) uses
@@ -66,7 +64,6 @@ class LBFGS(Optimizer):
             falls back to force_consistent=False if not.
         """
         Optimizer.__init__(self, atoms, restart, logfile, trajectory, master,
-                           append_trajectory=append_trajectory,
                            force_consistent=force_consistent)
 
         if maxstep is not None:

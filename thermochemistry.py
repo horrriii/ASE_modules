@@ -8,6 +8,7 @@ import numpy as np
 from ase import units
 from warnings import warn
 
+
 class ThermoChem:
     """Base class containing common methods used in thermochemistry
     calculations."""
@@ -70,6 +71,7 @@ class HarmonicThermo(ThermoChem):
 
     def __init__(self, vib_energies, potentialenergy=0.,
                  ignore_imag_modes=False):
+        
         self.ignore_imag_modes = ignore_imag_modes
 
         # Check for imaginary frequencies.
@@ -80,7 +82,6 @@ class HarmonicThermo(ThermoChem):
         self.n_imag = n_imag
 
         self.potentialenergy = potentialenergy
-
 
     def get_internal_energy(self, temperature, verbose=True):
         """Returns the internal energy, in eV, in the harmonic approximation
@@ -440,26 +441,20 @@ class IdealGasThermo(ThermoChem):
         self.atoms = atoms
         self.sigma = symmetrynumber
         self.spin = spin
-        self.ignore_imag_modes = ignore_imag_modes
-        if natoms is None and atoms:
-            natoms = len(atoms)
-        self.natoms = natoms
-
-        # Sort the vibrations
-        vib_energies = list(vib_energies)
-        vib_energies.sort(key=np.abs)
-
+        if natoms is None:
+            if atoms:
+                natoms = len(atoms)
         # Cut the vibrations to those needed from the geometry.
         if natoms:
             if geometry == 'nonlinear':
-                vib_energies = vib_energies[-(3 * natoms - 6):]
+                self.vib_energies = vib_energies[-(3 * natoms - 6):]
             elif geometry == 'linear':
-                vib_energies = vib_energies[-(3 * natoms - 5):]
+                self.vib_energies = vib_energies[-(3 * natoms - 5):]
             elif geometry == 'monatomic':
-                vib_energies = []
-            else:
-                raise ValueError(f"Unsupported geometry: {geometry}")
-
+                self.vib_energies = []
+        else:
+            self.vib_energies = vib_energies
+        
         # Check for imaginary frequencies.
         vib_energies, n_imag = _clean_vib_energies(
             vib_energies, ignore_imag_modes=ignore_imag_modes
@@ -798,6 +793,3 @@ def _clean_vib_energies(vib_energies, ignore_imag_modes=False):
     vib_energies = np.real(vib_energies)  # clear +0.j
     
     return vib_energies, n_imag
-
-
-
