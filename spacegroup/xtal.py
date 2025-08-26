@@ -7,15 +7,15 @@ knowledge of the space group.
 
 """
 
-from typing import Dict, Any
+from typing import Any, Dict
 
 import numpy as np
 from scipy import spatial
 
 import ase
-from ase.symbols import string2symbols
-from ase.spacegroup import Spacegroup
 from ase.geometry import cellpar_to_cell
+from ase.spacegroup import Spacegroup
+from ase.symbols import string2symbols
 
 __all__ = ['crystal']
 
@@ -123,7 +123,7 @@ def crystal(symbols=None, basis=None, occupancies=None, spacegroup=1, setting=1,
         if symbols is None:
             symbols = basis.get_chemical_symbols()
     else:
-        basis_coords = np.array(basis, dtype=float, copy=False, ndmin=2)
+        basis_coords = np.array(basis, dtype=float, ndmin=2)
 
     if occupancies is not None:
         occupancies_dict = {}

@@ -2,12 +2,14 @@
 
 import os
 import re
-import warnings
 import subprocess
+import warnings
+
 import numpy as np
+
 from ase import Atom, Atoms
-from ase.units import Ha, Bohr
 from ase.calculators.calculator import ReadError
+from ase.units import Bohr, Ha
 
 
 def execute_command(args):
@@ -22,22 +24,24 @@ def read_data_group(data_group):
     return execute_command(['sdg', data_group]).strip()
 
 
-def parse_data_group(dg, dg_name):
+def parse_data_group(dgr, dg_name):
     """parse a data group"""
-    if len(dg) == 0:
+    if len(dgr) == 0:
         return None
-    lsep = None
-    ksep = None
-    ndg = dg.replace('$' + dg_name, '').strip()
-    if '\n' in ndg:
-        lsep = '\n'
-    if '=' in ndg:
-        ksep = '='
-    if not lsep and not ksep:
+    dg_key = '$' + dg_name
+    if not dgr.startswith(dg_key):
+        raise ValueError(f'data group does not start with {dg_key}')
+    ndg = dgr.replace(dg_key, '').strip()
+    ndg = re.sub(r'=\s+', '=', re.sub(r'\s+=', '=', ndg))
+    if all(c not in ndg for c in ('\n', ' ', '=')):
         return ndg
+    lsep = '\n' if '\n' in dgr else ' '
     result = {}
     lines = ndg.split(lsep)
     for line in lines:
+        if len(line) == 0:
+            continue
+        ksep = '=' if '=' in line else None
         fields = line.strip().split(ksep)
         if len(fields) == 2:
             result[fields[0]] = fields[1]
@@ -54,7 +58,7 @@ def read_output(regex, path):
         if filename.startswith('job.') or filename.endswith('.out'):
             checkfiles.append(filename)
     for filename in checkfiles:
-        with open(filename, 'rt') as f:
+        with open(filename) as f:
             lines = f.readlines()
             for line in lines:
                 match = re.search(regex, line)
@@ -187,9 +191,9 @@ def read_run_parameters(results):
 def read_energy(results, post_HF):
     """Read energy from Turbomole energy file."""
     try:
-        with open('energy', 'r') as enf:
+        with open('energy') as enf:
             text = enf.read().lower()
-    except IOError:
+    except OSError:
         raise ReadError('failed to read energy file')
     if text == '':
         raise ReadError('empty energy file')
@@ -218,7 +222,7 @@ def read_occupation_numbers(results):
     lines = execute_command(['eiger', '--all', '--pview']).split('\n')
     for line in lines:
         regex = (
-            r'^\s+(\d+)\.*\s+(\w*)\s+(\d+)\s+(\S+)'
+            r'^\s+(\d+)\.\s([\sab])\s*(\d+)\s?(\w+)'
             r'\s+(\d*\.*\d*)\s+([-+]?\d+\.\d*)'
         )
         match = re.search(regex, line)
@@ -470,11 +474,9 @@ def read_forces(results, natoms):
     """Read forces from Turbomole gradient file."""
     dg = read_data_group('grad')
     if len(dg) == 0:
-        return
-    file = open('gradient', 'r')
-    lines = file.readlines()
-    file.close()
-
+        return None
+    with open('gradient') as file:
+        lines = file.readlines()
     forces = np.array([[0, 0, 0]])
 
     nline = len(lines)
@@ -741,7 +743,7 @@ def read_charges(filename, natoms):
     """read partial charges on atoms from an ESP fit"""
     charges = None
     if os.path.exists(filename):
-        with open(filename, 'r') as infile:
+        with open(filename) as infile:
             lines = infile.readlines()
         oklines = None
         for n, line in enumerate(lines):

@@ -11,8 +11,8 @@ import re
 import numpy as np
 
 import ase
+from ase.geometry import cell_to_cellpar, cellpar_to_cell
 from ase.spacegroup import Spacegroup, crystal
-from ase.geometry import cellpar_to_cell, cell_to_cellpar
 
 
 def read_jsv(f):
@@ -65,17 +65,17 @@ def read_jsv(f):
                 if len(tokens) > 5:
                     shell_numbers[i] = float(tokens[5])  # float?
         elif tag == 'bonds':
-            for i in range(nbond):
+            for _ in range(nbond):
                 f.readline()
             bonds = NotImplemented
         elif tag == 'poly':
-            for i in range(npoly):
+            for _ in range(npoly):
                 f.readline()
             poly = NotImplemented
         elif tag == 'origin':
             origin = NotImplemented
         else:
-            raise ValueError('Unknown tag: "%s"' % tag)
+            raise ValueError(f'Unknown tag: "{tag}"')
 
     if headline == 'asymmetric_unit_cell':
         atoms = crystal(symbols=symbols,
@@ -96,7 +96,7 @@ def read_jsv(f):
                           )
         atoms.info['spacegroup'] = Spacegroup(spacegroup)
     else:
-        raise ValueError('Invalid JSV file type: "%s"' % headline)
+        raise ValueError(f'Invalid JSV file type: "{headline}"')
 
     atoms.info['title'] = title
     atoms.info['labels'] = labels

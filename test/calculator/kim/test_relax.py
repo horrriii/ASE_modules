@@ -1,6 +1,8 @@
 import numpy as np
-from ase.cluster import Icosahedron
 from pytest import mark
+
+from ase.cluster import Icosahedron
+from ase.optimize import BFGS
 
 
 @mark.calculator_lite
@@ -11,7 +13,6 @@ def test_relax(KIM, testdir):
     an icosahedral cluster of atoms and checking that the relaxed energy
     matches a known precomputed value for an example model.
     """
-    from ase.optimize import BFGS
 
     energy_ref = -0.56  # eV
 

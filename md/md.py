@@ -1,15 +1,20 @@
 """Molecular Dynamics."""
-
 import warnings
+from typing import IO, Optional, Union
+
 import numpy as np
 
-from ase.optimize.optimize import Dynamics
-from ase.md.logger import MDLogger
+from ase import Atoms, units
 from ase.io.trajectory import Trajectory
-from ase import units
+from ase.md.logger import MDLogger
+from ase.optimize.optimize import Dynamics
 
 
-def process_temperature(temperature, temperature_K, orig_unit):
+def process_temperature(
+    temperature: Optional[float],
+    temperature_K: Optional[float],
+    orig_unit: str,
+) -> float:
     """Handle that temperature can be specified in multiple units.
 
     For at least a transition period, molecular dynamics in ASE can
@@ -57,8 +62,15 @@ def process_temperature(temperature, temperature_K, orig_unit):
 class MolecularDynamics(Dynamics):
     """Base-class for all MD classes."""
 
-    def __init__(self, atoms, timestep, trajectory, logfile=None,
-                 loginterval=1, append_trajectory=False):
+    def __init__(
+        self,
+        atoms: Atoms,
+        timestep: float,
+        trajectory: Optional[str] = None,
+        logfile: Optional[Union[IO, str]] = None,
+        loginterval: int = 1,
+        append_trajectory: bool = False,
+    ):
         """Molecular Dynamics object.
 
         Parameters:
@@ -91,10 +103,19 @@ class MolecularDynamics(Dynamics):
         # dt as to be attached _before_ parent class is initialized
         self.dt = timestep
 
-        Dynamics.__init__(self, atoms, logfile=None, trajectory=None)
+        super().__init__(atoms, logfile=None, trajectory=None)
 
+        # Some codes (e.g. Asap) may be using filters to
+        # constrain atoms or do other things.  Current state of the art
+        # is that "atoms" must be either Atoms or Filter in order to
+        # work with dynamics.
+        #
+        # In the future, we should either use a special role interface
+        # for MD, or we should ensure that the input is *always* a Filter.
+        # That way we won't need to test multiple cases.  Currently,
+        # we do not test /any/ kind of MD with any kind of Filter in ASE.
+        self.atoms = atoms
         self.masses = self.atoms.get_masses()
-        self.max_steps = None
 
         if 0 in self.masses:
             warnings.warn('Zero mass encountered in atoms; this will '
@@ -127,14 +148,34 @@ class MolecularDynamics(Dynamics):
                 'timestep': self.dt}
 
     def irun(self, steps=50):
-        """ Call Dynamics.irun and adjust max_steps """
-        self.max_steps = steps + self.nsteps
-        return Dynamics.irun(self)
+        """Run molecular dynamics algorithm as a generator.
+
+        Parameters
+        ----------
+        steps : int, default=DEFAULT_MAX_STEPS
+            Number of molecular dynamics steps to be run.
+
+        Yields
+        ------
+        converged : bool
+            True if the maximum number of steps are reached.
+        """
+        return Dynamics.irun(self, steps=steps)
 
     def run(self, steps=50):
-        """ Call Dynamics.run and adjust max_steps """
-        self.max_steps = steps + self.nsteps
-        return Dynamics.run(self)
+        """Run molecular dynamics algorithm.
+
+        Parameters
+        ----------
+        steps : int, default=DEFAULT_MAX_STEPS
+            Number of molecular dynamics steps to be run.
+
+        Returns
+        -------
+        converged : bool
+            True if the maximum number of steps are reached.
+        """
+        return Dynamics.run(self, steps=steps)
 
     def get_time(self):
         return self.nsteps * self.dt

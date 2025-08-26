@@ -1,6 +1,9 @@
+import numpy as np
+
+from ase.dft import get_distribution_moment
+
+
 def test_distmom():
-    from ase.dft import get_distribution_moment
-    import numpy as np
 
     precision = 1E-8
 
@@ -11,7 +14,7 @@ def test_distmom():
                abs(center), abs(mom2 - 1.))) < precision
 
     x = np.linspace(-1., 1., 100000)
-    for order in range(0, 9):
+    for order in range(9):
         y = x**order
         area = get_distribution_moment(x, y)
         assert abs(area - (1. - (-1.)**(order + 1)) / (order + 1.)) < precision

@@ -1,9 +1,11 @@
-def test_h2o():
-    import ase.calculators.demon as demon
-    from ase import Atoms
-    from ase.optimize import BFGS
-    import numpy as np
+import numpy as np
 
+import ase.calculators.demon as demon
+from ase import Atoms
+from ase.optimize import BFGS
+
+
+def test_h2o(demon_factory):
     tol = 1.0e-6
 
     # d = 0.9575
@@ -41,7 +43,7 @@ def test_h2o():
     print(error)
 
     tol = 1.0e-6
-    assert(error < tol)
+    assert error < tol
 
     # dipole
     dipole = atoms.get_dipole_moment()
@@ -54,7 +56,7 @@ def test_h2o():
     print(error)
 
     tol = 1.0e-4
-    assert(error < tol)
+    assert error < tol
 
     # numerical forces
     forces_num = calc.calculate_numerical_forces(atoms, d=0.001)
@@ -70,7 +72,7 @@ def test_h2o():
     print(error)
 
     tol = 1.0e-4
-    assert(error < tol)
+    assert error < tol
 
     # analytical forces
     forces_an = atoms.get_forces()
@@ -86,7 +88,7 @@ def test_h2o():
     print(error)
 
     tol = 1.0e-3
-    assert(error < tol)
+    assert error < tol
 
     # optimize geometry
     with BFGS(atoms) as dyn:
@@ -105,6 +107,6 @@ def test_h2o():
     print(error)
 
     tol = 1.0e-3
-    assert(error < tol)
+    assert error < tol
 
     print('tests passed')

@@ -6,42 +6,81 @@ import os
 import re
 import warnings
 from time import time
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 import numpy as np
 
 from ase.atoms import Atoms
-from ase.calculators.calculator import all_properties, all_changes
+from ase.calculators.calculator import all_changes, all_properties
 from ase.data import atomic_numbers
 from ase.db.row import AtomsRow
 from ase.formula import Formula
 from ase.io.jsonio import create_ase_object
-from ase.parallel import world, DummyMPI, parallel_function, parallel_generator
+from ase.parallel import DummyMPI, parallel_function, parallel_generator, world
 from ase.utils import Lock, PurePath
-
 
 T2000 = 946681200.0  # January 1. 2000
 YEAR = 31557600.0  # 365.25 days
 
 
-# Format of key description: ('short', 'long', 'unit')
-default_key_descriptions = {
-    'id': ('ID', 'Uniqe row ID', ''),
-    'age': ('Age', 'Time since creation', ''),
-    'formula': ('Formula', 'Chemical formula', ''),
-    'pbc': ('PBC', 'Periodic boundary conditions', ''),
-    'user': ('Username', '', ''),
-    'calculator': ('Calculator', 'ASE-calculator name', ''),
-    'energy': ('Energy', 'Total energy', 'eV'),
-    'natoms': ('Number of atoms', '', ''),
-    'fmax': ('Maximum force', '', 'eV/Ang'),
-    'smax': ('Maximum stress', 'Maximum stress on unit cell',
-             '`\\text{eV/Ang}^3`'),
-    'charge': ('Charge', 'Net charge in unit cell', '|e|'),
-    'mass': ('Mass', 'Sum of atomic masses in unit cell', 'au'),
-    'magmom': ('Magnetic moment', '', 'au'),
-    'unique_id': ('Unique ID', 'Random (unique) ID', ''),
-    'volume': ('Volume', 'Volume of unit cell', '`\\text{Ang}^3`')}
+@functools.total_ordering
+class KeyDescription:
+    _subscript = re.compile(r'`(.)_(.)`')
+    _superscript = re.compile(r'`(.*)\^\{?(.*?)\}?`')
+
+    def __init__(self, key, shortdesc=None, longdesc=None, unit=''):
+        self.key = key
+
+        if shortdesc is None:
+            shortdesc = key
+
+        if longdesc is None:
+            longdesc = shortdesc
+
+        self.shortdesc = shortdesc
+        self.longdesc = longdesc
+
+        # Somewhat arbitrary that we do this conversion.  Can we avoid that?
+        # Previously done in create_key_descriptions().
+        unit = self._subscript.sub(r'\1<sub>\2</sub>', unit)
+        unit = self._superscript.sub(r'\1<sup>\2</sup>', unit)
+        unit = unit.replace(r'\text{', '').replace('}', '')
+
+        self.unit = unit
+
+    def __repr__(self):
+        cls = type(self).__name__
+        return (f'{cls}({self.key!r}, {self.shortdesc!r}, {self.longdesc!r}, '
+                f'unit={self.unit!r})')
+
+    # The templates like to sort key descriptions by shortdesc.
+    def __eq__(self, other):
+        return self.shortdesc == getattr(other, 'shortdesc', None)
+
+    def __lt__(self, other):
+        return self.shortdesc < getattr(other, 'shortdesc', self.shortdesc)
+
+
+def get_key_descriptions():
+    KD = KeyDescription
+    return {keydesc.key: keydesc for keydesc in [
+        KD('id', 'ID', 'Uniqe row ID'),
+        KD('age', 'Age', 'Time since creation'),
+        KD('formula', 'Formula', 'Chemical formula'),
+        KD('pbc', 'PBC', 'Periodic boundary conditions'),
+        KD('user', 'Username'),
+        KD('calculator', 'Calculator', 'ASE-calculator name'),
+        KD('energy', 'Energy', 'Total energy', unit='eV'),
+        KD('natoms', 'Number of atoms'),
+        KD('fmax', 'Maximum force', unit='eV/Å'),
+        KD('smax', 'Maximum stress', 'Maximum stress on unit cell',
+           unit='eV/Å³'),
+        KD('charge', 'Charge', 'Net charge in unit cell', unit='|e|'),
+        KD('mass', 'Mass', 'Sum of atomic masses in unit cell', unit='au'),
+        KD('magmom', 'Magnetic moment', unit='μ_B'),
+        KD('unique_id', 'Unique ID', 'Random (unique) ID'),
+        KD('volume', 'Volume', 'Volume of unit cell', unit='Å³')
+    ]}
 
 
 def now():
@@ -85,7 +124,7 @@ reserved_keys = set(all_properties +
                      'calculator', 'calculator_parameters',
                      'key_value_pairs', 'data'])
 
-numeric_keys = set(['id', 'energy', 'magmom', 'charge', 'natoms'])
+numeric_keys = {'id', 'energy', 'magmom', 'charge', 'natoms'}
 
 
 def check(key_value_pairs):
@@ -96,7 +135,7 @@ def check(key_value_pairs):
             continue
 
         if not word.match(key) or key in reserved_keys:
-            raise ValueError('Bad key: {}'.format(key))
+            raise ValueError(f'Bad key: {key}')
         try:
             Formula(key, strict=True)
         except ValueError:
@@ -108,26 +147,22 @@ def check(key_value_pairs):
                 'you will not find rows with your key.  Instead, you wil get '
                 'rows containing the atoms in the formula!'.format(key))
         if not isinstance(value, (numbers.Real, str, np.bool_)):
-            raise ValueError('Bad value for {!r}: {}'.format(key, value))
+            raise ValueError(f'Bad value for {key!r}: {value}')
         if isinstance(value, str):
-            for t in [int, float]:
+            for t in [bool, int, float]:
                 if str_represents(value, t):
                     raise ValueError(
                         'Value ' + value + ' is put in as string ' +
                         'but can be interpreted as ' +
-                        '{}! Please convert '.format(t.__name__) +
-                        'to {} using '.format(t.__name__) +
-                        '{}(value) before '.format(t.__name__) +
+                        f'{t.__name__}! Please convert ' +
+                        f'to {t.__name__} before ' +
                         'writing to the database OR change ' +
                         'to a different string.')
 
 
 def str_represents(value, t=int):
-    try:
-        t(value)
-    except ValueError:
-        return False
-    return True
+    new_value = convert_str_to_int_float_bool_or_str(value)
+    return isinstance(new_value, t)
 
 
 def connect(name, type='extract_from_name', create_indices=True,
@@ -204,7 +239,7 @@ def lock(method):
     return new_method
 
 
-def convert_str_to_int_float_or_str(value):
+def convert_str_to_int_float_bool_or_str(value):
     """Safe eval()"""
     try:
         return int(value)
@@ -280,7 +315,7 @@ def parse_selection(selection, **kwargs):
             key = atomic_numbers[key]
             value = int(value)
         elif isinstance(value, str):
-            value = convert_str_to_int_float_or_str(value)
+            value = convert_str_to_int_float_bool_or_str(value)
         if key in numeric_keys and not isinstance(value, (int, float)):
             msg = 'Wrong type for "{}{}{}" - must be a number'
             raise ValueError(msg.format(key, op, value))
@@ -291,6 +326,7 @@ def parse_selection(selection, **kwargs):
 
 class Database:
     """Base class for all databases."""
+
     def __init__(self, filename=None, create_indices=True,
                  use_lock_file=False, serial=False):
         """Database object.
@@ -367,9 +403,9 @@ class Database:
         anything and return None.
         """
 
-        for dct in self._select([],
-                                [(key, '=', value)
-                                 for key, value in key_value_pairs.items()]):
+        for _ in self._select([],
+                              [(key, '=', value)
+                               for key, value in key_value_pairs.items()]):
             return None
 
         atoms = Atoms()
@@ -495,7 +531,7 @@ class Database:
         len(db) to count all rows.
         """
         n = 0
-        for row in self.select(selection, **kwargs):
+        for _ in self.select(selection, **kwargs):
             n += 1
         return n
 
@@ -595,9 +631,9 @@ def float_to_time_string(t, long=False):
         if x > 5:
             break
     if long:
-        return '{:.3f} {}s'.format(x, longwords[s])
+        return f'{x:.3f} {longwords[s]}s'
     else:
-        return '{:.0f}{}'.format(round(x), s)
+        return f'{round(x):.0f}{s}'
 
 
 def object_to_bytes(obj: Any) -> bytes:
@@ -642,7 +678,7 @@ def o2b(obj: Any, parts: List[bytes]):
                                 offset]}
     if isinstance(obj, complex):
         return {'__complex__': [obj.real, obj.imag]}
-    objtype = getattr(obj, 'ase_objtype')
+    objtype = obj.ase_objtype
     if objtype:
         dct = o2b(obj.todict(), parts)
         dct['__ase_objtype__'] = objtype

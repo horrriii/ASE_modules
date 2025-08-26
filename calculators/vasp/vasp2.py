@@ -21,6 +21,7 @@ www.vasp.at
 """
 
 from ase.utils import deprecated
+
 from .vasp import Vasp
 
 
@@ -30,4 +31,8 @@ class Vasp2(Vasp):
         'class instead.'
     )
     def __init__(self, **kwargs):
+        """
+        .. deprecated:: 3.21.0
+            Use :class:`~ase.calculators.vasp.Vasp` instead.
+        """
         super().__init__(**kwargs)

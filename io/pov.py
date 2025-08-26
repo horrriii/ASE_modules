@@ -4,15 +4,15 @@ Module for povray file format support.
 See http://www.povray.org/ for details on the format.
 """
 from collections.abc import Sequence
-from subprocess import check_call, DEVNULL
 from os import unlink
 from pathlib import Path
+from subprocess import DEVNULL, check_call
 
 import numpy as np
 
-from ase.io.utils import PlottingVariables
-from ase.constraints import FixAtoms
 from ase import Atoms
+from ase.constraints import FixAtoms
+from ase.io.utils import PlottingVariables
 
 
 def pa(array):
@@ -84,7 +84,7 @@ def set_high_bondorder_pairs(bondpairs, high_bondorder_pairs=None):
                           3rd value is bond_offset """
 
     if high_bondorder_pairs is None:
-        high_bondorder_pairs = dict()
+        high_bondorder_pairs = {}
     bondpairs_ = []
     for pair in bondpairs:
         (a, b) = (pair[0], pair[1])
@@ -100,7 +100,35 @@ def set_high_bondorder_pairs(bondpairs, high_bondorder_pairs=None):
 
 
 class POVRAY:
+    # These new styles were an attempt to port the old styles o the correct
+    # gamma, many had or still have unphysical light properties inorder to
+    # acheive a certain look.
     material_styles_dict = dict(
+        simple='finish {phong 0.7 ambient 0.4 diffuse 0.55}',
+        # In general, 'pale' doesn't conserve energy and can look
+        # strange in many cases.
+        pale=('finish {ambient 0.9 diffuse 0.30 roughness 0.001 '
+              'specular 0.2 }'),
+        intermediate=('finish {ambient 0.4 diffuse 0.6 specular 0.1 '
+                      'roughness 0.04}'),
+        vmd=(
+            'finish {ambient 0.2 diffuse 0.80 phong 0.25 phong_size 10.0 '
+            'specular 0.2 roughness 0.1}'),
+        jmol=('finish {ambient 0.4 diffuse 0.6 specular 1 roughness 0.001 '
+              'metallic}'),
+        ase2=('finish {ambient 0.2 brilliance 3 diffuse 0.6 metallic '
+              'specular 0.7 roughness 0.04 reflection 0.15}'),
+        ase3=('finish {ambient 0.4 brilliance 2 diffuse 0.6 metallic '
+              'specular 1.0 roughness 0.001 reflection 0.0}'),
+        glass=('finish {ambient 0.4 diffuse 0.35 specular 1.0 '
+               'roughness 0.001}'),
+        glass2=('finish {ambient 0.3 diffuse 0.3 specular 1.0 '
+                'reflection 0.25 roughness 0.001}'),
+    )
+
+    # These styles were made when assumed_gamma was 1.0 which gives poor color
+    # reproduction, the correct gamma is 2.2 for the sRGB standard.
+    material_styles_dict_old = dict(
         simple='finish {phong 0.7}',
         pale=('finish {ambient 0.5 diffuse 0.85 roughness 0.001 '
               'specular 0.200 }'),
@@ -121,7 +149,7 @@ class POVRAY:
     )
 
     def __init__(self, cell, cell_vertices, positions, diameters, colors,
-                 image_width, image_height, constraints=tuple(), isosurfaces=[],
+                 image_width, image_height, constraints=(), isosurfaces=[],
                  display=False, pause=True, transparent=True, canvas_width=None,
                  canvas_height=None, camera_dist=50., image_plane=None,
                  camera_type='orthographic', point_lights=[],
@@ -270,7 +298,7 @@ class POVRAY:
     def from_PlottingVariables(cls, pvars, **kwargs):
         cell = pvars.cell
         cell_vertices = pvars.cell_vertices
-        if 'colors' in kwargs.keys():
+        if 'colors' in kwargs:
             colors = kwargs.pop('colors')
         else:
             colors = pvars.colors
@@ -304,6 +332,7 @@ Height={self.canvas_height}
 Antialias=True
 Antialias_Threshold=0.1
 Display={self.display}
+Display_Gamma=2.2
 Pause_When_Done={self.pause}
 Verbose=False
 """
@@ -352,7 +381,7 @@ Verbose=False
                         continue
 
                     cell_vertices += f'cylinder {{{pa(p1)}, {pa(p2)}, '\
-                                     f'Rcell pigment {{Black}}}}\n'
+                                     'Rcell pigment {Black}}\n'
                     # all strings are f-strings for consistency
             cell_vertices = cell_vertices.strip('\n')
 
@@ -461,24 +490,27 @@ Verbose=False
             colb = self.colors[b]
 
             if bond_order == 1:
-                draw_tuples = (posa, mida, cola, transa, texa),\
-                              (posb, midb, colb, transb, texb)
+                draw_tuples = (
+                    (posa, mida, cola, transa, texa),
+                    (posb, midb, colb, transb, texb))
 
             elif bond_order == 2:
                 bs = [x / 2 for x in bond_offset]
-                draw_tuples = (posa - bs, mida - bs, cola, transa, texa),\
-                              (posb - bs, midb - bs, colb, transb, texb),\
-                              (posa + bs, mida + bs, cola, transa, texa),\
-                              (posb + bs, midb + bs, colb, transb, texb)
+                draw_tuples = (
+                    (posa - bs, mida - bs, cola, transa, texa),
+                    (posb - bs, midb - bs, colb, transb, texb),
+                    (posa + bs, mida + bs, cola, transa, texa),
+                    (posb + bs, midb + bs, colb, transb, texb))
 
             elif bond_order == 3:
                 bs = bond_offset
-                draw_tuples = (posa, mida, cola, transa, texa),\
-                              (posb, midb, colb, transb, texb),\
-                              (posa + bs, mida + bs, cola, transa, texa),\
-                              (posb + bs, midb + bs, colb, transb, texb),\
-                              (posa - bs, mida - bs, cola, transa, texa),\
-                              (posb - bs, midb - bs, colb, transb, texb)
+                draw_tuples = (
+                    (posa, mida, cola, transa, texa),
+                    (posb, midb, colb, transb, texb),
+                    (posa + bs, mida + bs, cola, transa, texa),
+                    (posb + bs, midb + bs, colb, transb, texb),
+                    (posa - bs, mida - bs, cola, transa, texa),
+                    (posb - bs, midb - bs, colb, transb, texb))
 
             bondatoms += ''.join(f'cylinder {{{pa(p)}, '
                                  f'{pa(m)}, Rbond texture{{pigment '
@@ -502,10 +534,11 @@ Verbose=False
                     f'{trans}, {tex}) // #{a:n} \n'
         constraints = constraints.strip('\n')
 
-        pov = f"""#include "colors.inc"
+        pov = f"""#version 3.6;
+#include "colors.inc"
 #include "finish.inc"
 
-global_settings {{assumed_gamma 1 max_trace_level 6}}
+global_settings {{assumed_gamma 2.2 max_trace_level 6}}
 background {{{pc(self.background)}{' transmit 1.0' if self.transparent else ''}}}
 camera {{{self.camera_type}
   right -{self.image_width:.2f}*x up {self.image_height:.2f}*y
@@ -731,8 +764,8 @@ class POVRAYIsosurface:
             from skimage.measure import marching_cubes
         except ImportError:
             # Old skimage (remove at some point)
-            from skimage.measure import (
-                marching_cubes_lewiner as marching_cubes)
+            from skimage.measure import \
+                marching_cubes_lewiner as marching_cubes
 
         return marching_cubes(
             density_grid,

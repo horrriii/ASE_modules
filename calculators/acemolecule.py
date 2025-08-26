@@ -1,9 +1,8 @@
-# type: ignore
 import os
 from copy import deepcopy
+
+from ase.calculators.calculator import FileIOCalculator, ReadError
 from ase.io import read
-from ase.calculators.calculator import ReadError
-from ase.calculators.calculator import FileIOCalculator
 
 
 class ACE(FileIOCalculator):
@@ -34,7 +33,7 @@ class ACE(FileIOCalculator):
     }]
 
     order_list = ['BasicInformation', 'Guess', 'Scf']
-    guess_list = [{}]
+    guess_list = [{}]  # type: ignore[var-annotated]
     default_parameters = {'BasicInformation': basic_list, 'Guess': guess_list,
                           'Scf': scf_list, 'Force': force_list,
                           'TDDFT': tddft_list, 'order': order_list}
@@ -73,25 +72,23 @@ class ACE(FileIOCalculator):
             for section_name in section_sets:
                 repeat = kwargs['order'].count(section_name)
                 if section_name in self.default_parameters.keys():
-                    for i in range(repeat - 1):
+                    for _ in range(repeat - 1):
                         new_parameters[section_name] += deepcopy(
                             self.default_parameters[section_name])
                 else:
                     new_parameters[section_name] = []
-                    for i in range(repeat):
+                    for _ in range(repeat):
                         new_parameters[section_name].append({})
 
         # Update parameters
         for section in new_parameters['order']:
-            if section in kwargs.keys():
+            if section in kwargs:
                 if isinstance(kwargs[section], dict):
                     kwargs[section] = [kwargs[section]]
 
-                i = 0
-                for section_param in kwargs[section]:
+                for i, section_param in enumerate(kwargs[section]):
                     new_parameters[section][i] = update_parameter(
                         new_parameters[section][i], section_param)
-                    i += 1
         self.parameters = new_parameters
         return changed_parameters
 
@@ -99,17 +96,17 @@ class ACE(FileIOCalculator):
         FileIOCalculator.read(self, label)
         filename = self.label + ".log"
 
-        with open(filename, 'r') as fd:
+        with open(filename) as fd:
             lines = fd.readlines()
         if 'WARNING' in lines:
             raise ReadError(
-                "Not convergy energy in log file {}.".format(filename))
+                f"Not convergy energy in log file {filename}.")
         if '! total energy' not in lines:
-            raise ReadError("Wrong ACE-Molecule log file {}.".format(filename))
+            raise ReadError(f"Wrong ACE-Molecule log file {filename}.")
 
         if not os.path.isfile(filename):
             raise ReadError(
-                "Wrong ACE-Molecule input file {}.".format(filename))
+                f"Wrong ACE-Molecule input file {filename}.")
 
         self.read_results()
 
@@ -127,7 +124,7 @@ class ACE(FileIOCalculator):
         '''
         FileIOCalculator.write_input(self, atoms, properties, system_changes)
         with open(self.label + '.inp', 'w') as inputfile:
-            xyz_name = "{}.xyz".format(self.label)
+            xyz_name = f"{self.label}.xyz"
             atoms.write(xyz_name)
 
             run_parameters = self.prepare_input(xyz_name, properties)
@@ -153,7 +150,7 @@ class ACE(FileIOCalculator):
                 and 'Force' not in copied_parameters['order']):
             copied_parameters['order'].append('Force')
         copied_parameters["BasicInformation"][0]["GeometryFilename"] = \
-            "{}.xyz".format(self.label)
+            f"{self.label}.xyz"
         copied_parameters["BasicInformation"][0]["GeometryFormat"] = "xyz"
         return copied_parameters
 
@@ -183,8 +180,7 @@ class ACE(FileIOCalculator):
         depth: Nested input depth.
         '''
         for section, section_param in section.items():
-            if isinstance(section_param, str) or isinstance(
-                    section_param, int) or isinstance(section_param, float):
+            if isinstance(section_param, (str, int, float)):
                 fpt.write(
                     '    ' *
                     depth +

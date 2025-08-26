@@ -1,7 +1,14 @@
+import numpy as np
+
+from ase import Atoms
+from ase.ga import get_raw_score, set_raw_score
+from ase.ga.element_crossovers import OnePointElementCrossover
+from ase.ga.element_mutations import (MoveDownMutation, MoveLeftMutation,
+                                      MoveRightMutation, MoveUpMutation,
+                                      RandomElementMutation)
+
+
 def test_element_operators(seed):
-    import numpy as np
-    from ase import Atoms
-    from ase.ga.element_crossovers import OnePointElementCrossover
 
     # set up the random number generator
     rng = np.random.RandomState(seed)
@@ -19,28 +26,21 @@ def test_element_operators(seed):
     a3, desc = op.get_new_individual([a1, a2])
 
     syms = a3.get_chemical_symbols()
-    assert len(set([i for i in syms if i in cations])) < 4
-    assert len(set([i for i in syms if i in anions])) < 3
-
-    from ase.ga.element_mutations import RandomElementMutation
+    assert len({i for i in syms if i in cations}) < 4
+    assert len({i for i in syms if i in anions}) < 3
 
     op = RandomElementMutation([cations, anions], [3, 2], [.25, .5], rng=rng)
     a4, desc = op.get_new_individual([a1])
     syms = a4.get_chemical_symbols()
 
-    assert len(set([i for i in syms if i in cations])) < 4
-    assert len(set([i for i in syms if i in anions])) < 3
+    assert len({i for i in syms if i in cations}) < 4
+    assert len({i for i in syms if i in anions}) < 3
 
     op = RandomElementMutation(anions, 2, .5, rng=rng)
     a4, desc = op.get_new_individual([a2])
     syms = a4.get_chemical_symbols()
 
-    assert len(set([i for i in syms if i in anions])) == 2
-
-    from ase.ga.element_mutations import MoveDownMutation
-    from ase.ga.element_mutations import MoveUpMutation
-    from ase.ga.element_mutations import MoveRightMutation
-    from ase.ga.element_mutations import MoveLeftMutation
+    assert len({i for i in syms if i in anions}) == 2
 
     a1 = Atoms('SrSrClClClCl')
     a1.info['confid'] = 1
@@ -73,7 +73,6 @@ def test_element_operators(seed):
     a3, desc = op.get_new_individual([a2])
     syms = a3.get_chemical_symbols()
 
-    from ase.ga import set_raw_score, get_raw_score
     assert len(set(syms)) == 3
     set_raw_score(a3, 5.0)
     assert get_raw_score(a3) == 5.0

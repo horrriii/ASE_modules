@@ -1,7 +1,10 @@
-import numpy as np
 from itertools import combinations_with_replacement
 from math import erf
+
+import matplotlib.pyplot as plt
+import numpy as np
 from scipy.spatial.distance import cdist
+
 from ase.neighborlist import NeighborList
 from ase.utils import pbc2pbc
 
@@ -133,9 +136,8 @@ class OFPComparator:
             except TypeError:
                 newkey = str(key)
             if isinstance(val, dict):
-                fingerprints_encoded[newkey] = {}
-                for key2, val2 in val.items():
-                    fingerprints_encoded[newkey][str(key2)] = val2
+                fingerprints_encoded[newkey] = {
+                    str(key2): val2 for key2, val2 in val.items()}
             else:
                 fingerprints_encoded[newkey] = val
         typedic_encoded = {}
@@ -155,9 +157,9 @@ class OFPComparator:
                 newkey = newkey[0]
 
             if isinstance(val, dict):
-                fingerprints_decoded[newkey] = {}
-                for key2, val2 in val.items():
-                    fingerprints_decoded[newkey][int(key2)] = np.array(val2)
+                fingerprints_decoded[newkey] = {
+                    int(key2): np.array(val2) for key2, val2 in val.items()
+                }
             else:
                 fingerprints_decoded[newkey] = np.array(val)
         typedic_decoded = {}
@@ -421,16 +423,17 @@ class OFPComparator:
         :doi:`10.1016/j.cpc.2010.06.007`"""
 
         # total number of atoms:
-        n_tot = sum([len(typedic[key]) for key in typedic])
+        n_tot = sum(len(typedic[key]) for key in typedic)
+        inv_n_tot = 1. / n_tot
 
         local_orders = []
-        for index, fingerprints in individual_fingerprints.items():
+        for fingerprints in individual_fingerprints.values():
             local_order = 0
             for unique_type, fingerprint in fingerprints.items():
                 term = np.linalg.norm(fingerprint)**2
                 term *= self.binwidth
-                term *= (volume * 1. / n_tot)**3
-                term *= len(typedic[unique_type]) * 1. / n_tot
+                term *= (volume * inv_n_tot)**(-1 / 3)
+                term *= len(typedic[unique_type]) * inv_n_tot
                 local_order += term
             local_orders.append(np.sqrt(local_order))
 
@@ -488,11 +491,6 @@ class OFPComparator:
     def plot_fingerprints(self, a, prefix=''):
         """ Function for quickly plotting all the fingerprints.
         Prefix = a prefix you want to give to the resulting PNG file."""
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError:
-            Warning("Matplotlib could not be loaded - plotting won't work")
-            raise
 
         if 'fingerprints' in a.info and not self.recalculate:
             fp, typedic = a.info['fingerprints']
@@ -507,19 +505,13 @@ class OFPComparator:
 
         for key, val in fp.items():
             plt.plot(x, val)
-            suffix = "_fp_{0}_{1}.png".format(key[0], key[1])
+            suffix = f"_fp_{key[0]}_{key[1]}.png"
             plt.savefig(prefix + suffix)
             plt.clf()
 
     def plot_individual_fingerprints(self, a, prefix=''):
         """ Function for plotting all the individual fingerprints.
         Prefix = a prefix for the resulting PNG file."""
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError:
-            Warning("Matplotlib could not be loaded - plotting won't work")
-            raise
-
         if 'individual_fingerprints' in a.info and not self.recalculate:
             fp, typedic = a.info['individual_fingerprints']
         else:
@@ -534,6 +526,6 @@ class OFPComparator:
             for key2, val2 in val.items():
                 plt.plot(x, val2)
                 plt.ylim([-1, 10])
-                suffix = "_individual_fp_{0}_{1}.png".format(key, key2)
+                suffix = f"_individual_fp_{key}_{key2}.png"
                 plt.savefig(prefix + suffix)
                 plt.clf()

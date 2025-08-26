@@ -1,15 +1,16 @@
+import numpy as np
+
+from ase.build import fcc111
+from ase.constraints import FixAtoms
+from ase.ga import set_raw_score
+from ase.ga.data import DataConnection, PrepareDB
+from ase.ga.startgenerator import StartGenerator
+from ase.ga.utilities import closest_distances_generator
+
 db_file = 'gadb_logics_test.db'
 
 
 def test_database_logic(seed, testdir):
-    from ase.ga.data import PrepareDB
-    from ase.ga.data import DataConnection
-    from ase.ga.startgenerator import StartGenerator
-    from ase.ga.utilities import closest_distances_generator
-    from ase.ga import set_raw_score
-    import numpy as np
-    from ase.build import fcc111
-    from ase.constraints import FixAtoms
 
     # set up the random number generator
     rng = np.random.RandomState(seed)
@@ -43,7 +44,7 @@ def test_database_logic(seed, testdir):
                         rng=rng)
 
     # generate the starting population
-    starting_population = [sg.get_new_candidate() for i in range(20)]
+    starting_population = [sg.get_new_candidate() for _ in range(20)]
 
     d = PrepareDB(db_file_name=db_file,
                   simulation_cell=slab,

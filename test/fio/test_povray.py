@@ -1,14 +1,14 @@
-from subprocess import check_call, DEVNULL
+from subprocess import DEVNULL, check_call
 
 import numpy as np
 import pytest
 
 from ase import Atoms
-from ase.cell import Cell
 from ase.build import molecule
-from ase.io.pov import (write_pov, get_bondpairs, set_high_bondorder_pairs,
-                        POVRAYIsosurface)
+from ase.cell import Cell
 from ase.io import write
+from ase.io.pov import (POVRAYIsosurface, get_bondpairs,
+                        set_high_bondorder_pairs, write_pov)
 
 
 def test_povray_io(testdir, povray_executable):
@@ -49,12 +49,12 @@ def test_deprecated(testdir):
         write_pov('tmp.pov', molecule('H2'), run_povray=True)
 
 
-@pytest.fixture
+@pytest.fixture()
 def skimage():
     return pytest.importorskip('skimage')
 
 
-@pytest.fixture
+@pytest.fixture()
 def isosurface_things(skimage):
     rng = np.random.RandomState(42)
     cell = Cell(rng.random((3, 3)))

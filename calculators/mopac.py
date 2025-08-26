@@ -12,18 +12,18 @@ import re
 from typing import Sequence
 from warnings import warn
 
-from packaging import version
 import numpy as np
+from packaging import version
 
 from ase import Atoms
-from ase.calculators.calculator import FileIOCalculator, ReadError, Parameters
-from ase.units import kcal, mol, Debye
+from ase.calculators.calculator import FileIOCalculator, Parameters, ReadError
+from ase.units import Debye, kcal, mol
 
 
 class MOPAC(FileIOCalculator):
     implemented_properties = ['energy', 'forces', 'dipole',
                               'magmom', 'free_energy']
-    command = 'mopac PREFIX.mop 2> /dev/null'
+    _legacy_default_command = 'mopac PREFIX.mop 2> /dev/null'
     discard_results_on_any_change = True
 
     default_parameters = dict(
@@ -35,6 +35,10 @@ class MOPAC(FileIOCalculator):
     methods = ['AM1', 'MNDO', 'MNDOD', 'PM3', 'PM6', 'PM6-D3', 'PM6-DH+',
                'PM6-DH2', 'PM6-DH2X', 'PM6-D3H4', 'PM6-D3H4X', 'PMEP', 'PM7',
                'PM7-TS', 'RM1']
+
+    fileio_rules = FileIOCalculator.ruleset(
+        extend_argv=['{prefix}.mop'],
+        stdout_name='{prefix}.out')
 
     def __init__(self, restart=None,
                  ignore_bad_restart_file=FileIOCalculator._deprecated,
@@ -53,6 +57,7 @@ class MOPAC(FileIOCalculator):
 
         >>> from ase.build import molecule
         >>> from ase.calculators.mopac import MOPAC
+        >>>
         >>> atoms = molecule('O2')
         >>> atoms.calc = MOPAC(label='O2')
         >>> atoms.get_potential_energy()
@@ -87,7 +92,7 @@ class MOPAC(FileIOCalculator):
         s = f'{p.method} {p.task} '
 
         if p.relscf:
-            s += 'RELSCF={0} '.format(p.relscf)
+            s += f'RELSCF={p.relscf} '
 
         # Write charge:
         if p.charge is None:
@@ -96,7 +101,7 @@ class MOPAC(FileIOCalculator):
             charge = p.charge
 
         if charge != 0:
-            s += 'CHARGE={0} '.format(int(round(charge)))
+            s += f'CHARGE={int(round(charge))} '
 
         magmom = int(round(abs(atoms.get_initial_magnetic_moments().sum())))
         if magmom:
@@ -107,11 +112,11 @@ class MOPAC(FileIOCalculator):
 
         # Write coordinates:
         for xyz, symbol in zip(atoms.positions, atoms.get_chemical_symbols()):
-            s += ' {0:2} {1} 1 {2} 1 {3} 1\n'.format(symbol, *xyz)
+            s += ' {:2} {} 1 {} 1 {} 1\n'.format(symbol, *xyz)
 
         for v, pbc in zip(atoms.cell, atoms.pbc):
             if pbc:
-                s += 'Tv {0} {1} {2}\n'.format(*v)
+                s += 'Tv {} {} {}\n'.format(*v)
 
         with open(self.label + '.mop', 'w') as fd:
             fd.write(s)
@@ -273,8 +278,7 @@ class MOPAC(FileIOCalculator):
             match = version_regex.match(line)
             if match:
                 return match.groups()[0]
-        else:
-            return ValueError('Version number was not found in MOPAC output')
+        return ValueError('Version number was not found in MOPAC output')
 
     def get_eigenvalues(self, kpt=0, spin=0):
         return self.eigenvalues[spin, kpt]

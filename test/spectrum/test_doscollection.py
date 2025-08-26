@@ -1,11 +1,11 @@
-import pytest
 from typing import Iterable
 
 import numpy as np
-from ase.spectrum.doscollection import (DOSCollection,
-                                        GridDOSCollection,
+import pytest
+
+from ase.spectrum.doscollection import (DOSCollection, GridDOSCollection,
                                         RawDOSCollection)
-from ase.spectrum.dosdata import DOSData, RawDOSData, GridDOSData
+from ase.spectrum.dosdata import DOSData, GridDOSData, RawDOSData
 
 
 class MinimalDOSCollection(DOSCollection):
@@ -23,17 +23,17 @@ class YetAnotherDOSCollection(DOSCollection):
 
 
 class TestDOSCollection:
-    @pytest.fixture
+    @pytest.fixture()
     def rawdos(self):
         return RawDOSData([1., 2., 4.], [2., 3., 2.],
                           info={'my_key': 'my_value'})
 
-    @pytest.fixture
+    @pytest.fixture()
     def another_rawdos(self):
         return RawDOSData([3., 2., 5.], [1., 0., 2.],
                           info={'other_key': 'other_value'})
 
-    @pytest.fixture
+    @pytest.fixture()
     def mindoscollection(self, rawdos, another_rawdos):
         return MinimalDOSCollection([rawdos, another_rawdos])
 
@@ -244,7 +244,7 @@ class TestDOSCollection:
         assert np.allclose(summed.get_energies(), total.get_energies())
         assert np.allclose(summed.get_weights(), total.get_weights())
         assert (set(total.info.items()) - set(summed.info.items())
-                == set([('label', 'Total')]))
+                == {('label', 'Total')})
 
     select_info = [[{'a': '1', 'b': '1'}, {'a': '2'}],
                    [{'a': '1', 'b': '1'}, {'a': '1', 'b': '2'}],
@@ -301,7 +301,7 @@ class TestDOSCollection:
 
 
 class TestRawDOSCollection:
-    @pytest.fixture
+    @pytest.fixture()
     def griddos(self):
         energies = np.linspace(1, 10, 7)
         weights = np.sin(energies)
@@ -313,19 +313,19 @@ class TestRawDOSCollection:
 
 
 class TestGridDOSCollection:
-    @pytest.fixture
+    @pytest.fixture()
     def griddos(self):
         energies = np.linspace(1, 10, 7)
         weights = np.sin(energies)
         return GridDOSData(energies, weights, info={'my_key': 'my_value'})
 
-    @pytest.fixture
+    @pytest.fixture()
     def another_griddos(self):
         energies = np.linspace(1, 10, 7)
         weights = np.cos(energies)
         return GridDOSData(energies, weights, info={'my_key': 'other_value'})
 
-    @pytest.fixture
+    @pytest.fixture()
     def griddoscollection(self, griddos, another_griddos):
         return GridDOSCollection([griddos, another_griddos])
 

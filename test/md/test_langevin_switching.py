@@ -1,13 +1,14 @@
 import numpy as np
 import pytest
-from ase.build import bulk
+
 from ase import units
-from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
+from ase.build import bulk
 from ase.calculators.harmonic import SpringCalculator
 from ase.md.switch_langevin import SwitchLangevin
+from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
 
-@pytest.mark.slow
+@pytest.mark.slow()
 def test_langevin_switching():
     # params
     size = 6

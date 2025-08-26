@@ -19,14 +19,14 @@ using a centered difference method [3].
     simulations with centered-difference Stoermer algorithms.", Physical
     Review A, 41, p. 4552 (1990).
 '''
-
 import sys
 import weakref
+from typing import IO, Optional, Tuple, Union
 
 import numpy as np
 
+from ase import Atoms, units
 from ase.md.md import MolecularDynamics
-from ase import units
 
 linalg = np.linalg
 
@@ -39,12 +39,22 @@ class NPT(MolecularDynamics):
     classname = "NPT"  # Used by the trajectory.
     _npt_version = 2   # Version number, used for Asap compatibility.
 
-    def __init__(self, atoms,
-                 timestep, temperature=None, externalstress=None,
-                 ttime=None, pfactor=None,
-                 *, temperature_K=None,
-                 mask=None, trajectory=None, logfile=None, loginterval=1,
-                 append_trajectory=False):
+    def __init__(
+        self,
+        atoms: Atoms,
+        timestep: float,
+        temperature: Optional[float] = None,
+        externalstress: Optional[float] = None,
+        ttime: Optional[float] = None,
+        pfactor: Optional[float] = None,
+        *,
+        temperature_K: Optional[float] = None,
+        mask: Optional[Union[Tuple[int], np.ndarray]] = None,
+        trajectory: Optional[str] = None,
+        logfile: Optional[Union[IO, str]] = None,
+        loginterval: int = 1,
+        append_trajectory: bool = False,
+    ):
         '''Constant pressure/stress and temperature dynamics.
 
         Combined Nose-Hoover and Parrinello-Rahman dynamics, creating an
@@ -146,7 +156,8 @@ class NPT(MolecularDynamics):
         self.zero_center_of_mass_momentum(verbose=1)
         self.temperature = units.kB * self._process_temperature(
             temperature, temperature_K, 'eV')
-        self.set_stress(externalstress)
+        if externalstress is not None:
+            self.set_stress(externalstress)
         self.set_mask(mask)
         self.eta = np.zeros((3, 3), float)
         self.zeta = 0.0
@@ -269,7 +280,7 @@ class NPT(MolecularDynamics):
                 raise NotImplementedError(
                     "You have modified the atoms since the last timestep.")
 
-        for i in range(steps):
+        for _ in range(steps):
             self.step()
             self.nsteps += 1
             self.call_observers()
@@ -655,7 +666,7 @@ class NPT(MolecularDynamics):
     # A few helper methods, which have been placed in separate methods
     # so they can be replaced in the parallel version.
     def _synchronize(self):
-        """Synchronizes eta, h and zeta on all processors in a parallel simulation.
+        """Synchronize eta, h and zeta on all processors.
 
         In a parallel simulation, eta, h and zeta are communicated
         from the master to all slaves, to prevent numerical noise from
@@ -663,7 +674,7 @@ class NPT(MolecularDynamics):
 
         In a serial simulation, do nothing.
         """
-        pass  # This is a serial simulation object.  Do nothing.
+        # This is a serial simulation object.  Do nothing.
 
     def _getnatoms(self):
         """Get the number of atoms.

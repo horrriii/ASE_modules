@@ -1,15 +1,15 @@
-import pytest
 import numpy as np
+import pytest
 
 from ase.build import fcc111
 from ase.ga.slab_operators import (CutSpliceSlabCrossover,
+                                   NeighborhoodElementMutation,
                                    RandomCompositionMutation,
                                    RandomElementMutation,
-                                   NeighborhoodElementMutation,
                                    RandomSlabPermutation)
 
 
-@pytest.fixture
+@pytest.fixture()
 def cu_slab():
     a = 1
     size = (2, 4, 3)

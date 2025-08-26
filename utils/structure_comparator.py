@@ -1,7 +1,7 @@
 """Determine symmetry equivalence of two structures.
 Based on the recipe from Comput. Phys. Commun. 183, 690-697 (2012)."""
 from collections import Counter
-from itertools import combinations, product, filterfalse
+from itertools import combinations, filterfalse, product
 
 import numpy as np
 from scipy.spatial import cKDTree as KDTree
@@ -19,7 +19,7 @@ class SpgLibNotFoundError(Exception):
     """Raised if SPG lib is not found when needed."""
 
     def __init__(self, msg):
-        super(SpgLibNotFoundError, self).__init__(msg)
+        super().__init__(msg)
 
 
 class SymmetryEquivalenceCheck:
@@ -464,7 +464,7 @@ class SymmetryEquivalenceCheck:
         return np.any(s[1:] == s[:-1])
 
     def _elements_match(self, s1, s2, kdtree):
-        """Check if all the elements in s1 match the corresponding position in s2
+        """Check if all the elements in s1 match corresponding position in s2
 
         NOTE: The unit cells may be in different octants
         Hence, try all cyclic permutations of x,y and z

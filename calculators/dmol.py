@@ -75,12 +75,14 @@ grd    outfile for orbitals from DMol3 - cellpar in Angstrom
 
 import os
 import re
+
 import numpy as np
+
 from ase import Atoms
+from ase.calculators.calculator import FileIOCalculator, Parameters, ReadError
 from ase.io import read
 from ase.io.dmol import write_dmol_car, write_dmol_incoor
-from ase.units import Hartree, Bohr
-from ase.calculators.calculator import FileIOCalculator, Parameters, ReadError
+from ase.units import Bohr, Hartree
 
 
 class DMol3(FileIOCalculator):
@@ -91,24 +93,26 @@ class DMol3(FileIOCalculator):
                           'symmetry': 'on'}
     discard_results_on_any_change = True
 
-    if 'DMOL_COMMAND' in os.environ:
-        command = os.environ['DMOL_COMMAND'] + ' PREFIX > PREFIX.out'
-    else:
-        command = None
-
     def __init__(self, restart=None,
                  ignore_bad_restart_file=FileIOCalculator._deprecated,
-                 label='dmol_calc/tmp', atoms=None, **kwargs):
+                 label='dmol_calc/tmp', atoms=None,
+                 command=None, **kwargs):
         """ Construct DMol3 calculator. """
-        FileIOCalculator.__init__(self, restart, ignore_bad_restart_file,
-                                  label, atoms, **kwargs)
+
+        if command is None:
+            if 'DMOL_COMMAND' in self.cfg:
+                command = self.cfg['DMOL_COMMAND'] + ' PREFIX > PREFIX.out'
+
+        super().__init__(restart, ignore_bad_restart_file,
+                         label, atoms, command=command,
+                         **kwargs)
 
         # tracks if DMol transformed coordinate system
         self.internal_transformation = False
 
     def write_input(self, atoms, properties=None, system_changes=None):
 
-        if not (np.all(atoms.pbc) or not np.any(atoms.pbc)):
+        if not np.all(atoms.pbc) and np.any(atoms.pbc):
             raise RuntimeError('PBC must be all true or all false')
 
         self.clean()   # Remove files from old run
@@ -228,7 +232,7 @@ class DMol3(FileIOCalculator):
         elif not np.any(self.atoms.pbc):  # [False,False,False]
             try:
                 data = np.loadtxt(self.label + '.rot')
-            except IOError:
+            except OSError:
                 self.internal_transformation = False
             else:
                 self.internal_transformation = True
@@ -303,7 +307,7 @@ class DMol3(FileIOCalculator):
     def read_forces(self):
         """ Read forces from .grad file. Applies self.rotation_matrix if
         self.internal_transformation is True. """
-        with open(self.label + '.grad', 'r') as fd:
+        with open(self.label + '.grad') as fd:
             lines = fd.readlines()
 
         forces = []
@@ -407,7 +411,7 @@ class DMol3(FileIOCalculator):
         return None
 
     def _outmol_lines(self):
-        with open(self.label + '.outmol', 'r') as fd:
+        with open(self.label + '.outmol') as fd:
             return fd.readlines()
 
     def read_kpts(self, mode='ibz_k_points'):
@@ -437,7 +441,7 @@ class DMol3(FileIOCalculator):
                 return False
             if line.rfind('Calculation is Spin_unrestricted') > -1:
                 return True
-        raise IOError('Could not read spin restriction from outmol')
+        raise OSError('Could not read spin restriction from outmol')
 
     def read_fermi(self):
         """Reads the Fermi level.
@@ -457,11 +461,11 @@ class DMol3(FileIOCalculator):
         """Reads the different energy contributions."""
 
         lines = self._outmol_lines()
-        energies = dict()
+        energies = {}
         for n, line in enumerate(lines):
             if line.startswith('Energy components'):
                 m = n + 1
-                while not lines[m].strip() == '':
+                while lines[m].strip() != '':
                     energies[lines[m].split('=')[0].strip()] = \
                         float(re.findall(
                             r"[-+]?\d*\.\d+|\d+", lines[m])[0]) * Hartree
@@ -588,7 +592,7 @@ def read_grd(filename):
     """
     from ase.geometry.cell import cellpar_to_cell
 
-    with open(filename, 'r') as fd:
+    with open(filename) as fd:
         lines = fd.readlines()
 
     cell_data = np.array([float(fld) for fld in lines[2].split()])

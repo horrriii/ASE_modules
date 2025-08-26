@@ -1,23 +1,24 @@
-import pytest
-import numpy as np
 from functools import partial
-from ase import Atoms
-from ase.transport.tools import dagger, normalize
-from ase.dft.kpoints import monkhorst_pack
-from ase.build import molecule, bulk
-from ase.io.cube import read_cube
-from ase.lattice import CUB, FCC, BCC, TET, BCT, ORC, ORCF, ORCI, ORCC, HEX, \
-    RHL, MCL, MCLC, TRI, OBL, HEX2D, RECT, CRECT, SQR, LINE
-from ase.dft.wannier import gram_schmidt, lowdin, \
-    neighbor_k_search, calculate_weights, steepest_descent, md_min, \
-    rotation_from_projection, init_orbitals, scdm, Wannier, \
-    search_for_gamma_point, arbitrary_s_orbitals
-from ase.dft.wannierstate import random_orthogonal_matrix
 
+import numpy as np
+import pytest
+
+from ase import Atoms
+from ase.build import bulk, molecule
+from ase.dft.kpoints import monkhorst_pack
+from ase.dft.wannier import (Wannier, arbitrary_s_orbitals, calculate_weights,
+                             gram_schmidt, init_orbitals, lowdin, md_min,
+                             neighbor_k_search, rotation_from_projection, scdm,
+                             search_for_gamma_point, steepest_descent)
+from ase.dft.wannierstate import random_orthogonal_matrix
+from ase.io.cube import read_cube
+from ase.lattice import (BCC, BCT, CRECT, CUB, FCC, HEX, HEX2D, LINE, MCL,
+                         MCLC, OBL, ORC, ORCC, ORCF, ORCI, RECT, RHL, SQR, TET,
+                         TRI)
+from ase.transport.tools import dagger, normalize
 
 calc = pytest.mark.calculator
 Nk = 2
-gpts = (8, 8, 8)
 
 
 @pytest.fixture()
@@ -31,12 +32,13 @@ def _base_calculator_gpwfile(tmp_path_factory, factories):
     Generic method to cache calculator in a file on disk.
     """
     def __base_calculator_gpwfile(atoms, filename,
-                                  nbands, gpts=gpts,
+                                  nbands, gpts=(8, 8, 8),
                                   kpts=(Nk, Nk, Nk)):
         factories.require('gpaw')
         import gpaw
         gpw_path = tmp_path_factory.mktemp('sub') / filename
         calc = gpaw.GPAW(
+            mode='fd',
             gpts=gpts,
             nbands=nbands,
             kpts={'size': kpts, 'gamma': True},
@@ -101,7 +103,7 @@ def ti_calculator(_ti_calculator_gpwfile):
     return gpaw.GPAW(_ti_calculator_gpwfile, txt=None)
 
 
-@pytest.fixture
+@pytest.fixture()
 def wan(rng, h2_calculator):
     def _wan(
         atoms=None,
@@ -111,6 +113,7 @@ def wan(rng, h2_calculator):
         fixedenergy=None,
         initialwannier='bloch',
         functional='std',
+        gpts=(8, 8, 8),
         kpts=None,
         file=None,
         rng=rng,
@@ -142,6 +145,7 @@ def wan(rng, h2_calculator):
         if calc is None:
             gpaw = pytest.importorskip('gpaw')
             calc = gpaw.GPAW(
+                mode='fd',
                 gpts=gpts,
                 nbands=nwannier,
                 kpts=kpts,
@@ -289,7 +293,7 @@ def test_rotation_from_projection(rng):
     assert normalization_error(U_ww) < 1e-10, 'U_ww not normalized'
 
 
-@pytest.mark.calculator_lite
+@pytest.mark.calculator_lite()
 def test_save(tmpdir, wan):
     wanf = wan(nwannier=4, fixedstates=2, initialwannier='bloch')
     jsonfile = tmpdir.join('wanf.json')
@@ -335,12 +339,12 @@ def test_get_functional_value(fun, wan):
     assert f1 < f2
 
 
-@pytest.mark.calculator_lite
+@pytest.mark.calculator_lite()
 @calc('gpaw')
 def test_get_centers(factory):
     # Rough test on the position of the Wannier functions' centers
     gpaw = pytest.importorskip('gpaw')
-    calc = gpaw.GPAW(gpts=(32, 32, 32), nbands=4, txt=None)
+    calc = gpaw.GPAW(mode='fd', gpts=(32, 32, 32), nbands=4, txt=None)
     atoms = molecule('H2', calculator=calc)
     atoms.center(vacuum=3.)
     atoms.get_potential_energy()
@@ -362,7 +366,7 @@ def test_write_cube_default(wan, h2_calculator, testdir):
     # It returns some errors when using file objects, so we use a string
     cubefilename = 'wanf.cube'
     wanf.write_cube(index, cubefilename)
-    with open(cubefilename, mode='r') as inputfile:
+    with open(cubefilename) as inputfile:
         content = read_cube(inputfile)
     assert pytest.approx(content['atoms'].cell.array) == atoms.cell.array * 2
     assert pytest.approx(content['data']) == abs(wanf.get_function(index))
@@ -379,7 +383,7 @@ def test_write_cube_angle(wan, testdir):
     # It returns some errors when using file objects, so we use a string
     cubefilename = 'wanf.cube'
     wanf.write_cube(index, cubefilename, angle=True)
-    with open(cubefilename, mode='r') as inputfile:
+    with open(cubefilename) as inputfile:
         content = read_cube(inputfile)
     assert pytest.approx(content['atoms'].cell.array) == atoms.cell.array
     assert pytest.approx(content['data']) == np.angle(wanf.get_function(index))
@@ -398,7 +402,7 @@ def test_write_cube_repeat(wan, testdir):
     cubefilename = 'wanf.cube'
     wanf.write_cube(index, cubefilename, repeat=repetition)
 
-    with open(cubefilename, mode='r') as inputfile:
+    with open(cubefilename) as inputfile:
         content = read_cube(inputfile)
     assert pytest.approx(content['atoms'].cell.array) == \
         (atoms * repetition).cell.array
@@ -427,11 +431,11 @@ def test_get_spectral_weight_random(wan, rng):
         assert wanf.get_spectral_weight(i).sum() == pytest.approx(1)
 
 
-@pytest.mark.calculator_lite
+@pytest.mark.calculator_lite()
 def test_get_pdos(wan):
     nwannier = 4
     gpaw = pytest.importorskip('gpaw')
-    calc = gpaw.GPAW(gpts=(16, 16, 16), nbands=nwannier, txt=None)
+    calc = gpaw.GPAW(mode='fd', gpts=(16, 16, 16), nbands=nwannier, txt=None)
     atoms = molecule('H2')
     atoms.center(vacuum=3.)
     atoms.calc = calc
@@ -589,7 +593,7 @@ def test_get_hamiltonian_kpoint(wan, rng, h2_calculator):
 
 def test_get_function(wan):
     nwannier = 2
-    gpts_np = np.array(gpts)
+    gpts_np = np.array((8, 8, 8))
     wanf = wan(nwannier=nwannier, initialwannier='bloch')
     assert (wanf.get_function(index=[0, 0]) == 0).all()
     assert wanf.get_function(index=[0, 1]) + wanf.get_function(index=[1, 0]) \
@@ -604,7 +608,7 @@ def test_get_function(wan):
 # @pytest.mark.calculator_lite
 @pytest.mark.parametrize('fun', ['std', 'var'])
 def test_get_gradients(fun, wan, rng):
-    wanf = wan(nwannier=4, fixedstates=2, kpts=(1, 1, 1),
+    wanf = wan(nwannier=4, fixedstates=2, gpts=(12, 12, 12), kpts=(1, 1, 1),
                initialwannier='bloch', functional=fun)
     # create an anti-hermitian array/matrix
     step = rng.random(wanf.get_gradients().size) + \
@@ -688,7 +692,7 @@ def test_init_orbitals_h2(rng):
     ntot = 2
     orbs = init_orbitals(atoms=atoms, ntot=ntot, rng=rng)
     angular_momenta = [orb[1] for orb in orbs]
-    assert sum([l_ * 2 + 1 for l_ in angular_momenta]) == ntot
+    assert sum(l_ * 2 + 1 for l_ in angular_momenta) == ntot
     assert angular_momenta == [0] * ntot
 
 
@@ -699,7 +703,7 @@ def test_init_orbitals_ti(rng):
     ntot = 14
     orbs = init_orbitals(atoms=atoms, ntot=ntot, rng=rng)
     angular_momenta = [orb[1] for orb in orbs]
-    assert sum([l_ * 2 + 1 for l_ in angular_momenta]) == ntot
+    assert sum(l_ * 2 + 1 for l_ in angular_momenta) == ntot
     assert 0 in angular_momenta
     assert 2 in angular_momenta
 
@@ -742,7 +746,7 @@ def test_scdm(ti_calculator):
         assert normalization_error(C_kul[k]) < 1e-10, 'C_ul not normalized'
 
 
-@pytest.mark.xfail
+@pytest.mark.xfail()
 def test_get_optimal_nwannier(wan, si_calculator):
     """ Test method to compute the optimal 'nwannier' value. """
 
@@ -773,7 +777,7 @@ def test_get_optimal_nwannier(wan, si_calculator):
     assert opt_nw >= 0
 
 
-@pytest.mark.xfail
+@pytest.mark.xfail()
 def test_spread_contributions(wan):
     # Only a test on a constant value to make sure it does not deviate too much
     wan1 = wan()

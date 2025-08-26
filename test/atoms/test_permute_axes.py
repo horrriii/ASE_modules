@@ -1,13 +1,16 @@
+import numpy as np
+from numpy.testing import assert_allclose
+
+from ase import Atoms
+from ase.geometry import permute_axes
+
+
 def test_permute_axes():
-    import numpy as np
-    from numpy.testing import assert_allclose
-    from ase import Atoms
-    from ase.geometry import permute_axes
 
     TOL = 1E-10
 
     rng = np.random.RandomState(0)
-    for i in range(20):
+    for _ in range(20):
         n = 10
         atoms = Atoms(numbers=[1] * n,
                       scaled_positions=rng.uniform(0, 1, (n, 3)),

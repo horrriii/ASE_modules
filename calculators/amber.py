@@ -7,11 +7,12 @@ Before usage, input files (infile, topologyfile, incoordfile)
 """
 
 import subprocess
-import numpy as np
 
-from ase.calculators.calculator import Calculator, FileIOCalculator
-import ase.units as units
+import numpy as np
 from scipy.io import netcdf
+
+import ase.units as units
+from ase.calculators.calculator import Calculator, FileIOCalculator
 
 
 class Amber(FileIOCalculator):
@@ -84,20 +85,22 @@ class Amber(FileIOCalculator):
         self.incoordfile = incoordfile
         self.outcoordfile = outcoordfile
         self.mdcoordfile = mdcoordfile
-        if command is not None:
-            self.command = command
-        else:
-            self.command = (self.amber_exe +
-                            ' -i ' + self.infile +
-                            ' -o ' + self.outfile +
-                            ' -p ' + self.topologyfile +
-                            ' -c ' + self.incoordfile +
-                            ' -r ' + self.outcoordfile)
-            if self.mdcoordfile is not None:
-                self.command = self.command + ' -x ' + self.mdcoordfile
 
         FileIOCalculator.__init__(self, restart, ignore_bad_restart_file,
-                                  label, atoms, **kwargs)
+                                  label, atoms, command=command,
+                                  **kwargs)
+
+    @property
+    def _legacy_default_command(self):
+        command = (self.amber_exe +
+                   ' -i ' + self.infile +
+                   ' -o ' + self.outfile +
+                   ' -p ' + self.topologyfile +
+                   ' -c ' + self.incoordfile +
+                   ' -r ' + self.outcoordfile)
+        if self.mdcoordfile is not None:
+            command = command + ' -x ' + self.mdcoordfile
+        return command
 
     def write_input(self, atoms=None, properties=None, system_changes=None):
         """Write updated coordinates to a file."""
@@ -115,7 +118,8 @@ class Amber(FileIOCalculator):
             only rectangular unit cells are allowed"""
         if filename == '':
             filename = self.incoordfile
-        fout = netcdf.netcdf_file(filename, 'w')
+        from scipy.io import netcdf_file
+        fout = netcdf_file(filename, 'w')
         # dimension
         fout.Conventions = 'AMBERRESTART'
         fout.ConventionVersion = "1.0"
@@ -192,8 +196,9 @@ class Amber(FileIOCalculator):
         if filename == '':
             filename = self.outcoordfile
 
-        from scipy.io import netcdf
         import numpy as np
+        from scipy.io import netcdf
+
         import ase.units as units
 
         fin = netcdf.netcdf_file(filename, 'r')
@@ -239,7 +244,7 @@ class Amber(FileIOCalculator):
 
     def read_energy(self, filename='mden'):
         """ read total energy from amber file """
-        with open(filename, 'r') as fd:
+        with open(filename) as fd:
             lines = fd.readlines()
         self.results['energy'] = \
             float(lines[16].split()[2]) * units.kcal / units.mol
@@ -273,7 +278,7 @@ class Amber(FileIOCalculator):
         subprocess.check_call(parmed_command, shell=True, cwd=self.directory)
 
     def get_virtual_charges(self, atoms):
-        with open(self.topologyfile, 'r') as fd:
+        with open(self.topologyfile) as fd:
             topology = fd.readlines()
         for n, line in enumerate(topology):
             if '%FLAG CHARGE' in line:

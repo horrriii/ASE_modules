@@ -1,12 +1,15 @@
+import numpy as np
+from numpy.testing import assert_allclose
+
+from ase.cell import Cell
+
+
 def test_standard_form():
-    import numpy as np
-    from numpy.testing import assert_allclose
-    from ase.cell import Cell
 
     TOL = 1E-10
     rng = np.random.RandomState(0)
 
-    for i in range(20):
+    for _ in range(20):
         cell0 = rng.uniform(-1, 1, (3, 3))
         for sign in [-1, 1]:
             cell = Cell(sign * cell0)

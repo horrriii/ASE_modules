@@ -1,8 +1,9 @@
 import numpy as np
 import pytest
+
 from ase.build import bulk
 from ase.calculators.lj import LennardJones
-from ase.constraints import UnitCellFilter
+from ase.filters import UnitCellFilter
 from ase.optimize import BFGS
 
 # Theoretical infinite-cutoff LJ FCC unit cell parameters
@@ -10,7 +11,7 @@ vol0 = 4 * 0.91615977036  # theoretical minimum
 a0 = vol0**(1 / 3)
 
 
-@pytest.fixture
+@pytest.fixture()
 def atoms():
     """two atoms at potential minimum"""
     atoms = bulk('X', 'fcc', a=a0)
@@ -32,7 +33,8 @@ def test_stress_voigt_shape(atoms):
         assert atoms.get_stresses(voigt=False, **kw).shape == (len(atoms), 3, 3)
 
 
-@pytest.mark.slow
+@pytest.mark.optimize()
+@pytest.mark.slow()
 def test_stress(atoms):
     cell0 = atoms.get_cell()
 

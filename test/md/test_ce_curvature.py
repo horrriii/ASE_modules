@@ -1,12 +1,12 @@
 '''These tests ensure that the computed PEC curvature matche the actual
 geometries using a somewhat agressive angle_limit for each stepsize.'''
-import pytest
-from ase import Atoms
-from ase.md.contour_exploration import ContourExploration
 import numpy as np
+import pytest
+
+from ase import Atoms
 from ase.calculators.emt import EMT
 from ase.constraints import FixAtoms
-
+from ase.md.contour_exploration import ContourExploration
 
 pair_distance = 2.5
 
@@ -33,17 +33,17 @@ def test_curvature1(testdir):
     atoms.set_velocities([[0, 0, 0], [0, 1, 0]])
 
     with ContourExploration(
-            atoms,
-            maxstep=1.5,
-            parallel_drift=0.0,
-            angle_limit=30,
-            trajectory=name + '.traj',
-            logfile=name + '.log',
+        atoms,
+        maxstep=1.5,
+        parallel_drift=0.0,
+        angle_limit=30,
+        trajectory=name + '.traj',
+        logfile=name + '.log',
     ) as dyn:
-        print("Target Radius (1/curvature) {: .6f} Ang".format(radius))
-        for i in range(5):
+        print(f"Target Radius (1/curvature) {radius: .6f} Ang")
+        for _ in range(5):
             dyn.run(30)
-            print('Radius (1/curvature) {: .6f} Ang'.format(1 / dyn.curvature))
+            print(f'Radius (1/curvature) {1 / dyn.curvature: .6f} Ang')
             assert radius == pytest.approx(1.0 / dyn.curvature, abs=2e-3)
 
 
@@ -59,15 +59,15 @@ def test_curvature2(testdir):
     atoms.set_velocities([[0, -1, 0], [0, 1, 0]])
 
     with ContourExploration(
-            atoms,
-            maxstep=1.0,
-            parallel_drift=0.0,
-            angle_limit=30,
-            trajectory=name + '.traj',
-            logfile=name + '.log',
+        atoms,
+        maxstep=1.0,
+        parallel_drift=0.0,
+        angle_limit=30,
+        trajectory=name + '.traj',
+        logfile=name + '.log',
     ) as dyn:
-        print("Target Radius (1/curvature) {: .6f} Ang".format(radius))
-        for i in range(5):
+        print(f"Target Radius (1/curvature) {radius: .6f} Ang")
+        for _ in range(5):
             dyn.run(30)
-            print('Radius (1/curvature) {: .6f} Ang'.format(1 / dyn.curvature))
+            print(f'Radius (1/curvature) {1 / dyn.curvature: .6f} Ang')
             assert radius == pytest.approx(1.0 / dyn.curvature, abs=2e-3)

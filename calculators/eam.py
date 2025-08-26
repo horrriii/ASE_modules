@@ -9,11 +9,12 @@
 # License: See accompanying license files for details
 
 import os
-import numpy as np
 
-from ase.neighborlist import NeighborList
-from ase.calculators.calculator import Calculator, all_changes
+import numpy as np
 from scipy.interpolate import InterpolatedUnivariateSpline as spline
+
+from ase.calculators.calculator import Calculator, all_changes
+from ase.neighborlist import NeighborList
 from ase.units import Bohr, Hartree
 
 
@@ -264,8 +265,8 @@ End EAM Interface Documentation
             if arg in valid_args:
                 setattr(self, arg, val)
             else:
-                raise RuntimeError('unknown keyword arg "%s" : not in %s'
-                                   % (arg, valid_args))
+                raise RuntimeError(
+                    f'unknown keyword arg "{arg}" : not in {valid_args}')
 
     def set_form(self, name):
         """set the form variable based on the file name suffix"""
@@ -280,7 +281,7 @@ End EAM Interface Documentation
         elif extension == '.fs':
             self.form = 'fs'
         else:
-            raise RuntimeError('unknown file extension type: %s' % extension)
+            raise RuntimeError(f'unknown file extension type: {extension}')
 
     def read_potential(self, filename):
         """Reads a LAMMPS EAM file in alloy or adp format
@@ -328,20 +329,20 @@ End EAM Interface Documentation
             self.cutoff = float(data[8])
 
             n = 9 + self.nrho
-            self.embedded_data = np.array([np.float_(data[9:n])])
+            self.embedded_data = np.array([np.float64(data[9:n])])
 
             self.rphi_data = np.zeros([self.Nelements, self.Nelements,
                                        self.nr])
 
-            effective_charge = np.float_(data[n:n + self.nr])
+            effective_charge = np.float64(data[n:n + self.nr])
             # convert effective charges to rphi according to
             # http://lammps.sandia.gov/doc/pair_eam.html
             self.rphi_data[0, 0] = Bohr * Hartree * (effective_charge**2)
 
             self.density_data = np.array(
-                [np.float_(data[n + self.nr:n + 2 * self.nr])])
+                [np.float64(data[n + self.nr:n + 2 * self.nr])])
 
-        elif self.form in ['alloy', 'adq']:
+        elif self.form in ['alloy', 'adp']:
             self.header = lines[:3]
             i = 3
 
@@ -374,10 +375,10 @@ End EAM Interface Documentation
                 self.lattice.append(data[d + 3])
                 d += 4
 
-                self.embedded_data[elem] = np.float_(
+                self.embedded_data[elem] = np.float64(
                     data[d:(d + self.nrho)])
                 d += self.nrho
-                self.density_data[elem] = np.float_(data[d:(d + self.nr)])
+                self.density_data[elem] = np.float64(data[d:(d + self.nr)])
                 d += self.nr
 
             # reads in the r*phi data for each interaction between elements
@@ -386,7 +387,7 @@ End EAM Interface Documentation
 
             for i in range(self.Nelements):
                 for j in range(i + 1):
-                    self.rphi_data[j, i] = np.float_(data[d:(d + self.nr)])
+                    self.rphi_data[j, i] = np.float64(data[d:(d + self.nr)])
                     d += self.nr
 
         elif self.form == 'fs':
@@ -423,13 +424,13 @@ End EAM Interface Documentation
                 self.lattice.append(data[d + 3])
                 d += 4
 
-                self.embedded_data[elem] = np.float_(
+                self.embedded_data[elem] = np.float64(
                     data[d:(d + self.nrho)])
                 d += self.nrho
-                self.density_data[elem, :, :] = np.float_(
-                    data[d:(d + self.nr*self.Nelements)]).reshape([
+                self.density_data[elem, :, :] = np.float64(
+                    data[d:(d + self.nr * self.Nelements)]).reshape([
                         self.Nelements, self.nr])
-                d += self.nr*self.Nelements
+                d += self.nr * self.Nelements
 
             # reads in the r*phi data for each interaction between elements
             self.rphi_data = np.zeros([self.Nelements, self.Nelements,
@@ -437,7 +438,7 @@ End EAM Interface Documentation
 
             for i in range(self.Nelements):
                 for j in range(i + 1):
-                    self.rphi_data[j, i] = np.float_(data[d:(d + self.nr)])
+                    self.rphi_data[j, i] = np.float64(data[d:(d + self.nr)])
                     d += self.nr
 
         self.r = np.arange(0, self.nr) * self.dr
@@ -449,7 +450,7 @@ End EAM Interface Documentation
         else:
             self.set_splines()
 
-        if (self.form == 'adp'):
+        if self.form == 'adp':
             self.read_adp_data(data, d)
             self.set_adp_splines()
 
@@ -572,7 +573,7 @@ End EAM Interface Documentation
         for line in self.header:
             fd.write(line)
 
-        fd.write('{0} '.format(self.Nelements).encode())
+        fd.write(f'{self.Nelements} '.encode())
         fd.write(' '.join(self.elements).encode() + b'\n')
 
         fd.write(('%d %f %d %f %f \n' %
@@ -634,8 +635,8 @@ End EAM Interface Documentation
             np.array([item in self.elements for item in elements]))
 
         if np.any(unavailable):
-            raise RuntimeError('These elements are not in the potential: %s' %
-                               elements[unavailable])
+            raise RuntimeError(
+                f'These elements are not in the potential: {elements[unavailable]}')
 
         # cutoffs need to be a vector for NeighborList
         cutoffs = self.cutoff * np.ones(len(atoms))
@@ -707,7 +708,7 @@ End EAM Interface Documentation
         trace_energy = 0.0
 
         self.total_density = np.zeros(len(atoms))
-        if (self.form == 'adp'):
+        if self.form == 'adp':
             self.mu = np.zeros([len(atoms), 3])
             self.lam = np.zeros([len(atoms), 3, 3])
 
@@ -772,7 +773,7 @@ End EAM Interface Documentation
         self.cell = atoms.get_cell().copy()
 
         energy = 0.0
-        for i in components.keys():
+        for i in components:
             energy += components[i]
 
         self.energy_free = energy
@@ -825,7 +826,7 @@ End EAM Interface Documentation
 
                 self.results['forces'][i] += np.dot(scale, urvec[nearest][use])
 
-                if (self.form == 'adp'):
+                if self.form == 'adp':
                     adp_forces = self.angular_forces(
                         self.mu[i],
                         self.mu[neighbors[nearest][use]],
@@ -906,7 +907,7 @@ End EAM Interface Documentation
         elif self.form == 'adp':
             nrow = 3
         else:
-            raise RuntimeError('Unknown form of potential: %s' % self.form)
+            raise RuntimeError(f'Unknown form of potential: {self.form}')
 
         if hasattr(self, 'r'):
             r = self.r

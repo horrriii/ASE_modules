@@ -1,12 +1,12 @@
-import pytest
 import numpy as np
-from ase.constraints import FixAtoms
+import pytest
 
+from ase.constraints import FixAtoms
 
 calc = pytest.mark.calculator
 
 
-@pytest.fixture
+@pytest.fixture()
 def calc_settings():
     """Some simple fast calculation settings"""
     return dict(xc='lda',

@@ -1,19 +1,21 @@
 """A class for computing vibrational modes"""
 
-from math import pi, sqrt, log
 import sys
+from collections import namedtuple
+from math import log, pi, sqrt
+from pathlib import Path
+from typing import Iterator, Tuple
 
 import numpy as np
-from pathlib import Path
 
-import ase.units as units
 import ase.io
-from ase.parallel import world, paropen
-
+import ase.units as units
+from ase.atoms import Atoms
+from ase.constraints import FixAtoms
+from ase.parallel import paropen, world
 from ase.utils.filecache import get_json_cache
-from .data import VibrationsData
 
-from collections import namedtuple
+from .data import VibrationsData
 
 
 class AtomicDisplacements:
@@ -151,7 +153,12 @@ class Vibrations(AtomicDisplacements):
         self.atoms = atoms
         self.calc = atoms.calc
         if indices is None:
-            indices = range(len(atoms))
+            fixed_indices = []
+            for constr in atoms.constraints:
+                if isinstance(constr, FixAtoms):
+                    fixed_indices.extend(constr.get_indices())
+            fixed_indices = list(set(fixed_indices))
+            indices = [i for i in range(len(atoms)) if i not in fixed_indices]
         if len(indices) != len(set(indices)):
             raise ValueError(
                 'one (or more) indices included more than once')
@@ -217,12 +224,26 @@ Please remove them and recalculate or run \
         if len(self.cache) == 0 and eq_pickle_path.exists():
             raise RuntimeError(pickle2json_instructions)
 
-    def iterdisplace(self, inplace=False):
-        """Yield name and atoms object for initial and displaced structures.
+    def iterdisplace(self, inplace=False) -> \
+            Iterator[Tuple[Displacement, Atoms]]:
+        """Iterate over initial and displaced structures.
 
         Use this to export the structures for each single-point calculation
         to an external program instead of using ``run()``. Then save the
         calculated gradients to <name>.json and continue using this instance.
+
+        Parameters:
+        ------------
+        inplace: bool
+            If True, the atoms object will be modified in-place. Otherwise a
+            copy will be made.
+
+        Yields:
+        --------
+        disp: Displacement
+            Displacement object with information about the displacement.
+        atoms: Atoms
+            Atoms object with the displaced structure.
         """
         # XXX change of type of disp
         atoms = self.atoms if inplace else self.atoms.copy()
@@ -363,7 +384,9 @@ Please remove them and recalculate or run \
                                ' to set all masses to non-zero values.')
 
         self.im = np.repeat(masses[self.indices]**-0.5, 3)
-        self._vibrations = self.get_vibrations(read_cache=False)
+        self._vibrations = self.get_vibrations(read_cache=False,
+                                               method=self.method,
+                                               direction=self.direction)
 
         omega2, modes = np.linalg.eigh(self.im[:, None] * H * self.im)
         self.modes = modes.T.copy()
@@ -431,7 +454,7 @@ Please remove them and recalculate or run \
 
     def get_zero_point_energy(self, freq=None):
         if freq:
-            raise NotImplementedError()
+            raise NotImplementedError
         return self.get_vibrations().get_zero_point_energy()
 
     def get_mode(self, n):
@@ -552,7 +575,7 @@ Please remove them and recalculate or run \
         outdata.T[1] = spectrum
 
         with open(out, 'w') as fd:
-            fd.write('# %s folded, width=%g cm^-1\n' % (type.title(), width))
+            fd.write(f'# {type.title()} folded, width={width:g} cm^-1\n')
             fd.write('# [cm^-1] arbitrary\n')
             for row in outdata:
                 fd.write('%.3f  %15.5e\n' %

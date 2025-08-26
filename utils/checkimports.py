@@ -14,7 +14,7 @@ import os
 import re
 import sys
 from pprint import pprint
-from subprocess import run, PIPE
+from subprocess import run
 from typing import List, Optional, Set
 
 
@@ -34,16 +34,13 @@ def exec_and_check_modules(expression: str) -> Set[str]:
     # `import os` before expression
     null = os.devnull
     command = ("import sys;"
-               f" stdout = sys.stdout; sys.stdout = open({repr(null)}, 'w');"
+               f" stdout = sys.stdout; sys.stdout = open({null!r}, 'w');"
                f" {expression};"
                " sys.stdout = stdout;"
                " modules = list(sys.modules);"
                " import json; print(json.dumps(modules))")
     proc = run([sys.executable, '-c', command],
-               # For Python 3.6 and possibly older
-               stdout=PIPE, stderr=PIPE, universal_newlines=True,
-               # For Python 3.7+ the next line is equivalent
-               # capture_output=True, text=True,
+               capture_output=True, universal_newlines=True,
                check=True)
     return set(json.loads(proc.stdout))
 
@@ -85,7 +82,10 @@ def check_imports(expression: str, *,
 
         nonstdlib_modules = []
         for module in modules:
-            if module.split('.')[0] in sys.stdlib_module_names:  # type: ignore
+            if (
+                module.split('.')[0]
+                in sys.stdlib_module_names  # type: ignore[attr-defined]
+            ):
                 continue
             nonstdlib_modules.append(module)
 

@@ -2,6 +2,7 @@ import re
 from typing import List, Tuple, Union
 
 import numpy as np
+
 from ase.atoms import Atoms
 from ase.calculators.singlepoint import (SinglePointDFTCalculator,
                                          SinglePointKPoint)
@@ -31,8 +32,20 @@ def read_forces(lines: List[str],
             x, y, z = lines[i].split()[-3:]
             f.append((float(x), float(y), float(z)))
         except (ValueError, IndexError) as m:
-            raise IOError('Malformed GPAW log file: %s' % m)
+            raise OSError(f'Malformed GPAW log file: {m}')
     return f, i
+
+
+def read_stresses(lines: List[str],
+                  ii: int,) -> Tuple[List[Tuple[float, float, float]], int]:
+    s = []
+    for i in range(ii + 1, ii + 4):
+        try:
+            x, y, z = lines[i].split()[-3:]
+            s.append((float(x), float(y), float(z)))
+        except (ValueError, IndexError) as m:
+            raise OSError(f'Malformed GPAW log file: {m}')
+    return s, i
 
 
 def read_gpaw_out(fileobj, index):  # -> Union[Atoms, List[Atoms]]:
@@ -150,7 +163,7 @@ def read_gpaw_out(fileobj, index):  # -> Union[Atoms, List[Atoms]]:
             ii += 1
             words = lines[ii].split()
             vals = []
-            while(len(words) > 2):
+            while len(words) > 2:
                 vals.append([float(w) for w in words])
                 ii += 1
                 words = lines[ii].split()
@@ -198,6 +211,13 @@ def read_gpaw_out(fileobj, index):  # -> Union[Atoms, List[Atoms]]:
             f, i = read_forces(lines, ii, atoms)
 
         try:
+            ii = lines.index('stress tensor:\n')
+        except ValueError:
+            stress_tensor = None
+        else:
+            stress_tensor, i = read_stresses(lines, ii)
+
+        try:
             parameters = {}
             ii = index_startswith(lines, 'vdw correction:')
         except ValueError:
@@ -229,7 +249,8 @@ def read_gpaw_out(fileobj, index):  # -> Union[Atoms, List[Atoms]]:
             calc = SinglePointDFTCalculator(atoms, energy=e, forces=f,
                                             dipole=dipole, magmoms=magmoms,
                                             efermi=eFermi,
-                                            bzkpts=bz_kpts, ibzkpts=ibz_kpts)
+                                            bzkpts=bz_kpts, ibzkpts=ibz_kpts,
+                                            stress=stress_tensor)
             calc.name = name
             calc.parameters = parameters
             if energy_contributions is not None:
@@ -241,6 +262,6 @@ def read_gpaw_out(fileobj, index):  # -> Union[Atoms, List[Atoms]]:
         images.append(atoms)
 
     if len(images) == 0:
-        raise IOError('Corrupted GPAW-text file!')
+        raise OSError('Corrupted GPAW-text file!')
 
     return images[index]

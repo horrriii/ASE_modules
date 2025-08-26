@@ -1,5 +1,3 @@
-from typing import Optional
-
 # This import is for the benefit of type-checking / mypy
 if False:
     import matplotlib.axes
@@ -14,7 +12,7 @@ class SimplePlottingAxes:
         self.ax = ax
         self.show = show
         self.filename = filename
-        self.figure = None  # type: Optional[matplotlib.figure.Figure]
+        self.figure = None
 
     def __enter__(self) -> 'matplotlib.axes.Axes':
         if self.ax is None:
@@ -36,4 +34,4 @@ class SimplePlottingAxes:
             if self.filename is not None:
                 self.figure.savefig(self.filename)
 
-        return None
+        return

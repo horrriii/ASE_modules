@@ -1,13 +1,13 @@
 """van der Waals correction schemes for DFT"""
 import numpy as np
-from ase.units import Bohr, Hartree
+from scipy.special import erfc, erfinv
+
 from ase.calculators.calculator import Calculator
 from ase.calculators.polarizability import StaticPolarizabilityCalculator
-from scipy.special import erfinv, erfc
 from ase.neighborlist import neighbor_list
-from ase.parallel import world, myslice
+from ase.parallel import myslice, world
+from ase.units import Bohr, Hartree
 from ase.utils import IOContext
-
 
 # dipole polarizabilities and C6 values from
 # X. Chu and A. Dalgarno, J. Chem. Phys. 121 (2004) 4083
@@ -147,7 +147,7 @@ class vdWTkatchenko09prl(Calculator, IOContext):
                  Rmax=10.,  # maximal radius for periodic calculations
                  Ldecay=1.,  # decay length for smoothing in periodic calcs
                  vdWDB_alphaC6=vdWDB_alphaC6,
-                 txt=None, sR=None):
+                 txt=None, sR=None, comm=world):
         """Constructor
 
         Parameters
@@ -166,8 +166,8 @@ class vdWTkatchenko09prl(Calculator, IOContext):
         if hasattr(self.calculator, 'world'):
             self.comm = self.calculator.world
         else:
-            self.comm = world  # the best we know
-        self.txt = self.openfile(txt, self.comm)
+            self.comm = comm  # the best we know
+        self.txt = self.openfile(file=txt, comm=self.comm)
 
         self.vdwradii = vdwradii
         self.vdWDB_alphaC6 = vdWDB_alphaC6
@@ -182,7 +182,7 @@ class vdWTkatchenko09prl(Calculator, IOContext):
             except KeyError:
                 raise ValueError(
                     'Tkatchenko-Scheffler dispersion correction not ' +
-                    'implemented for %s functional' % xc_name)
+                    f'implemented for {xc_name} functional')
         else:
             self.sR = sR
         self.d = 20
@@ -230,7 +230,7 @@ class vdWTkatchenko09prl(Calculator, IOContext):
         if self.vdwradii is not None:
             # external vdW radii
             vdwradii = self.vdwradii
-            assert(len(atoms) == len(vdwradii))
+            assert len(atoms) == len(vdwradii)
         else:
             vdwradii = []
             for atom in atoms:
@@ -239,7 +239,7 @@ class vdWTkatchenko09prl(Calculator, IOContext):
         if self.hirshfeld is None:
             volume_ratios = [1.] * len(atoms)
         elif hasattr(self.hirshfeld, '__len__'):  # a list
-            assert(len(atoms) == len(self.hirshfeld))
+            assert len(atoms) == len(self.hirshfeld)
             volume_ratios = self.hirshfeld
         else:  # should be an object
             self.hirshfeld.initialize()
@@ -247,9 +247,9 @@ class vdWTkatchenko09prl(Calculator, IOContext):
 
         # correction for effective C6
         na = len(atoms)
-        C6eff_a = np.empty((na))
-        alpha_a = np.empty((na))
-        R0eff_a = np.empty((na))
+        C6eff_a = np.empty(na)
+        alpha_a = np.empty(na)
+        R0eff_a = np.empty(na)
         for a, atom in enumerate(atoms):
             # free atom values
             alpha_a[a], C6eff_a[a] = self.vdWDB_alphaC6[atom.symbol]
@@ -282,12 +282,12 @@ class vdWTkatchenko09prl(Calculator, IOContext):
                                    a=atoms,
                                    cutoff=Reff,
                                    self_interaction=False)
-            atom_list = [[] for _ in range(0, len(atoms))]
-            d_list = [[] for _ in range(0, len(atoms))]
-            v_list = [[] for _ in range(0, len(atoms))]
+            atom_list = [[] for _ in range(len(atoms))]
+            d_list = [[] for _ in range(len(atoms))]
+            v_list = [[] for _ in range(len(atoms))]
             # r_list = [[] for _ in range(0, len(atoms))]
             # Look for neighbor pairs
-            for k in range(0, len(n_list[0])):
+            for k in range(len(n_list[0])):
                 i = n_list[0][k]
                 j = n_list[1][k]
                 dist = n_list[2][k]
@@ -305,7 +305,7 @@ class vdWTkatchenko09prl(Calculator, IOContext):
             v_list = []
             # r_list = []
             # Do this to avoid double counting
-            for i in range(0, len(atoms)):
+            for i in range(len(atoms)):
                 atom_list.append(range(i + 1, len(atoms)))
                 d_list.append([atoms.get_distance(i, j)
                                for j in range(i + 1, len(atoms))])
@@ -355,7 +355,7 @@ class vdWTkatchenko09prl(Calculator, IOContext):
                     # Forces go both ways for every interaction
                     forces[i] += force_ij
                     forces[j] -= force_ij
-        EvdW = self.comm.sum(EvdW)
+        EvdW = self.comm.sum_scalar(EvdW)
         self.comm.sum(forces)
 
         self.results['energy'] += EvdW
@@ -407,8 +407,8 @@ def calculate_ts09_polarizability(atoms):
     volume_ratios = calc.hirshfeld.get_effective_volume_ratios()
 
     na = len(atoms)
-    alpha_a = np.empty((na))
-    alpha_eff_a = np.empty((na))
+    alpha_a = np.empty(na)
+    alpha_eff_a = np.empty(na)
     for a, atom in enumerate(atoms):
         # free atom values
         alpha_a[a], _ = calc.vdWDB_alphaC6[atom.symbol]

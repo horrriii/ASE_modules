@@ -1,10 +1,12 @@
-def test_h2o():
-    from ase.calculators.demonnano import DemonNano
-    from ase import Atoms
-    from ase.optimize import BFGS
-    from ase.units import Bohr, Hartree
-    import numpy as np
+import numpy as np
 
+from ase import Atoms
+from ase.calculators.demonnano import DemonNano
+from ase.optimize import BFGS
+from ase.units import Bohr, Hartree
+
+
+def test_h2o(demonnano_factory):
     d = 0.9775
     t = np.pi / 180 * 110.51
     atoms = Atoms('H2O',
@@ -32,7 +34,7 @@ def test_h2o():
     print(error)
 
     tol = 1.0e-6
-    assert(error < tol)
+    assert error < tol
 
     # analytical forces
     forces_an = atoms.get_forces()
@@ -49,7 +51,7 @@ def test_h2o():
     print(error)
 
     tol = 1.0e-3
-    assert(error < tol)
+    assert error < tol
 
     # optimize geometry
     with BFGS(atoms) as dyn:
@@ -68,6 +70,6 @@ def test_h2o():
     print(error)
 
     tol = 1.0e-3
-    assert(error < tol)
+    assert error < tol
 
     print('tests passed')

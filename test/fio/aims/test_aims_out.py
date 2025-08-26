@@ -1,11 +1,12 @@
 # flake8: noqa
-import numpy as np
+from pathlib import Path
 
-from ase.io import read
+import numpy as np
+import pytest
+
+from ase.io import ParseError, read
 from ase.io.aims import read_aims_results
 from ase.stress import full_3x3_to_voigt_6_stress
-from numpy.linalg import norm
-from pathlib import Path
 
 parent = Path(__file__).parents[2]
 
@@ -90,8 +91,8 @@ def test_parse_relax(testdir):
     traj = read(parent / "testdata/aims/relax.out", ":", format="aims-output")
     assert len(traj) == 8
     p0 = [[0.0, 0.0, 0.0], [0.25, 0.25, 0.25]]
-    assert all([np.allclose(at.get_scaled_positions(), p0) for at in traj])
-    assert all([np.allclose(at.get_forces(), np.zeros((2, 3))) for at in traj])
+    assert all(np.allclose(at.get_scaled_positions(), p0) for at in traj)
+    assert all(np.allclose(at.get_forces(), np.zeros((2, 3))) for at in traj)
 
     s0 = full_3x3_to_voigt_6_stress(
         [
@@ -139,3 +140,58 @@ def test_parse_singlepoint(testdir):
     results = read_aims_results(parent / "testdata/aims/singlepoint.out")
     assert np.allclose(results["forces"], f0)
     assert np.abs(results["energy"] + 2.06302072675943e03) < 1e-15
+
+
+def test_parse_dfpt_dielectric(testdir):
+    outfile = parent / "testdata/aims/DFPT_dielectric.out"
+    atoms = read(outfile, format="aims-output")
+
+    diel = atoms.calc.results["dielectric_tensor"]
+
+    diel_0 = [
+        [7.18759265e00, -1.0000000e-15, 1.9000000e-14],
+        [-1.000000e-15, 7.18759284e00, 2.59000000e-13],
+        [2.0000000e-14, 2.58000000e-13, 7.1875928e00],
+    ]
+
+    assert np.allclose(diel, diel_0)
+
+
+def test_parse_polarization(testdir):
+    outfile = parent / "testdata/aims/polarization.out"
+    atoms = read(outfile, format="aims-output")
+
+    polar = atoms.calc.results["polarization"]
+
+    polar_0 = [-51.045557E-03, -51.045557E-03, -51.458008E-03]
+
+    assert np.allclose(polar, polar_0)
+
+
+def test_preamble_failed(testdir):
+    outfile = parent / "testdata/aims/preamble_fail.out"
+    with pytest.raises(ParseError, match='No SCF steps'):
+        read(outfile, format="aims-output")
+
+
+def test_numerical_stress(testdir):
+    outfile = parent / "testdata/aims/numerical_stress.out"
+
+    atoms = read(outfile, format="aims-output")
+    stress = atoms.get_stress()
+    stress_actual = [
+        0.00244726, 0.00267442, 0.00258710, 0.00000005, -0.00000026, -0.00000007
+    ]
+
+    assert np.allclose(stress, stress_actual)
+
+
+def test_spin_collinear_w_md_light(testdir):
+    """Issue 3345"""
+    outfile = parent / "testdata/aims/issue_3345_spin_md_light.out"
+    atoms = read(outfile, format="aims-output")
+
+    e0 = -13.0174218930995
+    ee = atoms.get_potential_energy()
+
+    assert np.allclose(e0, ee)

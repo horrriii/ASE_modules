@@ -12,26 +12,26 @@ Units are converted using CODATA 2006, as used internally by Quantum
 ESPRESSO.
 """
 
-import os
 import operator as op
 import re
 import warnings
-from collections import OrderedDict
-from os import path
+from collections import defaultdict
+from copy import deepcopy
+from pathlib import Path
 
 import numpy as np
 
 from ase.atoms import Atoms
-from ase.cell import Cell
+from ase.calculators.calculator import kpts2ndarray, kpts2sizeandoffsets
 from ase.calculators.singlepoint import (SinglePointDFTCalculator,
                                          SinglePointKPoint)
-from ase.calculators.calculator import kpts2ndarray, kpts2sizeandoffsets
-from ase.dft.kpoints import kpoint_convert
 from ase.constraints import FixAtoms, FixCartesian
-from ase.data import chemical_symbols, atomic_numbers
+from ase.data import chemical_symbols
+from ase.dft.kpoints import kpoint_convert
+from ase.io.espresso_namelist.keys import pw_keys
+from ase.io.espresso_namelist.namelist import Namelist
 from ase.units import create_units
-from ase.utils import iofunction
-
+from ase.utils import deprecated, reader, writer
 
 # Quantum ESPRESSO uses CODATA 2006 internally
 units = create_units('2006')
@@ -51,8 +51,8 @@ _PW_HIGHEST_OCCUPIED_LOWEST_FREE = 'highest occupied, lowest unoccupied level'
 _PW_KPTS = 'number of k points='
 _PW_BANDS = _PW_END
 _PW_BANDSTRUCTURE = 'End of band structure calculation'
-_PW_DIPOLE = 'Debye'
-_PW_DIPOLE_DIRECTION = 'Computed dipole along edir'
+_PW_DIPOLE = "Debye"
+_PW_DIPOLE_DIRECTION = "Computed dipole along edir"
 
 # ibrav error message
 ibrav_error_message = (
@@ -62,27 +62,8 @@ ibrav_error_message = (
     'to a high level of precision.')
 
 
-class Namelist(OrderedDict):
-    """Case insensitive dict that emulates Fortran Namelists."""
-
-    def __contains__(self, key):
-        return super(Namelist, self).__contains__(key.lower())
-
-    def __delitem__(self, key):
-        return super(Namelist, self).__delitem__(key.lower())
-
-    def __getitem__(self, key):
-        return super(Namelist, self).__getitem__(key.lower())
-
-    def __setitem__(self, key, value):
-        super(Namelist, self).__setitem__(key.lower(), value)
-
-    def get(self, key, default=None):
-        return super(Namelist, self).get(key.lower(), default)
-
-
-@iofunction('rU')
-def read_espresso_out(fileobj, index=-1, results_required=True):
+@reader
+def read_espresso_out(fileobj, index=slice(None), results_required=True):
     """Reads Quantum ESPRESSO output files.
 
     The atomistic configurations as well as results (energy, force, stress,
@@ -166,8 +147,8 @@ def read_espresso_out(fileobj, index=-1, results_required=True):
         for config_index, config_index_next in zip(
                 all_config_indexes,
                 all_config_indexes[1:] + [len(pwo_lines)]):
-            if any([config_index < results_index < config_index_next
-                    for results_index in results_indexes]):
+            if any(config_index < results_index < config_index_next
+                    for results_index in results_indexes):
                 results_config_indexes.append(config_index)
 
         # slice from the subset
@@ -178,7 +159,7 @@ def read_espresso_out(fileobj, index=-1, results_required=True):
     # Extract initialisation information each time PWSCF starts
     # to add to subsequent configurations. Use None so slices know
     # when to fill in the blanks.
-    pwscf_start_info = dict((idx, None) for idx in indexes[_PW_START])
+    pwscf_start_info = {idx: None for idx in indexes[_PW_START]}
 
     for image_index in image_indexes:
         # Find the nearest calculation start to parse info. Needed in,
@@ -318,7 +299,7 @@ def read_espresso_out(fileobj, index=-1, results_required=True):
                           "set verbosity='high' to print them."
 
         for kpts_index in indexes[_PW_KPTS]:
-            nkpts = int(pwo_lines[kpts_index].split()[4])
+            nkpts = int(re.findall(r'\b\d+\b', pwo_lines[kpts_index])[0])
             kpts_index += 2
 
             if pwo_lines[kpts_index].strip() == kpoints_warning:
@@ -396,8 +377,18 @@ def read_espresso_out(fileobj, index=-1, results_required=True):
 
         # Put everything together
         #
-        # I have added free_energy.  Can and should we distinguish
-        # energy and free_energy?  --askhl
+        # In PW the forces are consistent with the "total energy"; that's why
+        # its value must be assigned to free_energy.
+        # PW doesn't compute the extrapolation of the energy to 0K smearing
+        # the closer thing to this is again the total energy that contains
+        # the correct (i.e. variational) form of the band energy is
+        #   Eband = \int e N(e) de   for e<Ef , where N(e) is the DOS
+        # This differs by the term (-TS)  from the sum of KS eigenvalues:
+        #    Eks = \sum wg(n,k) et(n,k)
+        # which is non variational. When a Fermi-Dirac function is used
+        # for a given T, the variational energy is REALLY the free energy F,
+        # and F = E - TS , with E = non variational energy.
+        #
         calc = SinglePointDFTCalculator(structure, energy=energy,
                                         free_energy=energy,
                                         forces=forces, stress=stress,
@@ -513,7 +504,7 @@ def parse_position_line(line):
     return sym, float(x), float(y), float(z)
 
 
-@iofunction('rU')
+@reader
 def read_espresso_in(fileobj):
     """Parse a Quantum ESPRESSO input files, '.in', '.pwi'.
 
@@ -564,215 +555,28 @@ def read_espresso_in(fileobj):
     species_info = {}
     for ispec, (label, weight, pseudo) in enumerate(species_card):
         symbol = label_to_symbol(label)
-        valence = get_valence_electrons(symbol, data, pseudo)
 
         # starting_magnetization is in fractions of valence electrons
-        magnet_key = "starting_magnetization({0})".format(ispec + 1)
-        magmom = valence * data["system"].get(magnet_key, 0.0)
+        magnet_key = f"starting_magnetization({ispec + 1})"
+        magmom = data["system"].get(magnet_key, 0.0)
         species_info[symbol] = {"weight": weight, "pseudo": pseudo,
-                                "valence": valence, "magmom": magmom}
+                                "magmom": magmom}
 
     positions_card = get_atomic_positions(
         card_lines, n_atoms=data['system']['nat'], cell=cell, alat=alat)
 
     symbols = [label_to_symbol(position[0]) for position in positions_card]
     positions = [position[1] for position in positions_card]
+    constraint_flags = [position[2] for position in positions_card]
     magmoms = [species_info[symbol]["magmom"] for symbol in symbols]
 
     # TODO: put more info into the atoms object
     # e.g magmom, forces.
     atoms = Atoms(symbols=symbols, positions=positions, cell=cell, pbc=True,
                   magmoms=magmoms)
+    atoms.set_constraint(convert_constraint_flags(constraint_flags))
 
     return atoms
-
-
-def ibrav_to_cell(system):
-    """
-    Convert a value of ibrav to a cell. Any unspecified lattice dimension
-    is set to 0.0, but will not necessarily raise an error. Also return the
-    lattice parameter.
-
-    Parameters
-    ----------
-    system : dict
-        The &SYSTEM section of the input file, containing the 'ibrav' setting,
-        and either celldm(1)..(6) or a, b, c, cosAB, cosAC, cosBC.
-
-    Returns
-    -------
-    cell : Cell
-        The cell as an ASE Cell object
-
-    Raises
-    ------
-    KeyError
-        Raise an error if any required keys are missing.
-    NotImplementedError
-        Only a limited number of ibrav settings can be parsed. An error
-        is raised if the ibrav interpretation is not implemented.
-    """
-    if 'celldm(1)' in system and 'a' in system:
-        raise KeyError('do not specify both celldm and a,b,c!')
-    elif 'celldm(1)' in system:
-        # celldm(x) in bohr
-        alat = system['celldm(1)'] * units['Bohr']
-        b_over_a = system.get('celldm(2)', 0.0)
-        c_over_a = system.get('celldm(3)', 0.0)
-        cosab = system.get('celldm(4)', 0.0)
-        cosac = system.get('celldm(5)', 0.0)
-        cosbc = 0.0
-        if system['ibrav'] == 14:
-            cosbc = system.get('celldm(4)', 0.0)
-            cosac = system.get('celldm(5)', 0.0)
-            cosab = system.get('celldm(6)', 0.0)
-    elif 'a' in system:
-        # a, b, c, cosAB, cosAC, cosBC in Angstrom
-        raise NotImplementedError(
-            'params_to_cell() does not yet support A/B/C/cosAB/cosAC/cosBC')
-    else:
-        raise KeyError("Missing celldm(1)")
-
-    if system['ibrav'] == 1:
-        cell = np.identity(3) * alat
-    elif system['ibrav'] == 2:
-        cell = np.array([[-1.0, 0.0, 1.0],
-                         [0.0, 1.0, 1.0],
-                         [-1.0, 1.0, 0.0]]) * (alat / 2)
-    elif system['ibrav'] == 3:
-        cell = np.array([[1.0, 1.0, 1.0],
-                         [-1.0, 1.0, 1.0],
-                         [-1.0, -1.0, 1.0]]) * (alat / 2)
-    elif system['ibrav'] == -3:
-        cell = np.array([[-1.0, 1.0, 1.0],
-                         [1.0, -1.0, 1.0],
-                         [1.0, 1.0, -1.0]]) * (alat / 2)
-    elif system['ibrav'] == 4:
-        cell = np.array([[1.0, 0.0, 0.0],
-                         [-0.5, 0.5 * 3**0.5, 0.0],
-                         [0.0, 0.0, c_over_a]]) * alat
-    elif system['ibrav'] == 5:
-        tx = ((1.0 - cosab) / 2.0)**0.5
-        ty = ((1.0 - cosab) / 6.0)**0.5
-        tz = ((1 + 2 * cosab) / 3.0)**0.5
-        cell = np.array([[tx, -ty, tz],
-                         [0, 2 * ty, tz],
-                         [-tx, -ty, tz]]) * alat
-    elif system['ibrav'] == -5:
-        ty = ((1.0 - cosab) / 6.0)**0.5
-        tz = ((1 + 2 * cosab) / 3.0)**0.5
-        a_prime = alat / 3**0.5
-        u = tz - 2 * 2**0.5 * ty
-        v = tz + 2**0.5 * ty
-        cell = np.array([[u, v, v],
-                         [v, u, v],
-                         [v, v, u]]) * a_prime
-    elif system['ibrav'] == 6:
-        cell = np.array([[1.0, 0.0, 0.0],
-                         [0.0, 1.0, 0.0],
-                         [0.0, 0.0, c_over_a]]) * alat
-    elif system['ibrav'] == 7:
-        cell = np.array([[1.0, -1.0, c_over_a],
-                         [1.0, 1.0, c_over_a],
-                         [-1.0, -1.0, c_over_a]]) * (alat / 2)
-    elif system['ibrav'] == 8:
-        cell = np.array([[1.0, 0.0, 0.0],
-                         [0.0, b_over_a, 0.0],
-                         [0.0, 0.0, c_over_a]]) * alat
-    elif system['ibrav'] == 9:
-        cell = np.array([[1.0 / 2.0, b_over_a / 2.0, 0.0],
-                         [-1.0 / 2.0, b_over_a / 2.0, 0.0],
-                         [0.0, 0.0, c_over_a]]) * alat
-    elif system['ibrav'] == -9:
-        cell = np.array([[1.0 / 2.0, -b_over_a / 2.0, 0.0],
-                         [1.0 / 2.0, b_over_a / 2.0, 0.0],
-                         [0.0, 0.0, c_over_a]]) * alat
-    elif system['ibrav'] == 10:
-        cell = np.array([[1.0 / 2.0, 0.0, c_over_a / 2.0],
-                         [1.0 / 2.0, b_over_a / 2.0, 0.0],
-                         [0.0, b_over_a / 2.0, c_over_a / 2.0]]) * alat
-    elif system['ibrav'] == 11:
-        cell = np.array([[1.0 / 2.0, b_over_a / 2.0, c_over_a / 2.0],
-                         [-1.0 / 2.0, b_over_a / 2.0, c_over_a / 2.0],
-                         [-1.0 / 2.0, -b_over_a / 2.0, c_over_a / 2.0]]) * alat
-    elif system['ibrav'] == 12:
-        sinab = (1.0 - cosab**2)**0.5
-        cell = np.array([[1.0, 0.0, 0.0],
-                         [b_over_a * cosab, b_over_a * sinab, 0.0],
-                         [0.0, 0.0, c_over_a]]) * alat
-    elif system['ibrav'] == -12:
-        sinac = (1.0 - cosac**2)**0.5
-        cell = np.array([[1.0, 0.0, 0.0],
-                         [0.0, b_over_a, 0.0],
-                         [c_over_a * cosac, 0.0, c_over_a * sinac]]) * alat
-    elif system['ibrav'] == 13:
-        sinab = (1.0 - cosab**2)**0.5
-        cell = np.array([[1.0 / 2.0, 0.0, -c_over_a / 2.0],
-                         [b_over_a * cosab, b_over_a * sinab, 0.0],
-                         [1.0 / 2.0, 0.0, c_over_a / 2.0]]) * alat
-    elif system['ibrav'] == 14:
-        sinab = (1.0 - cosab**2)**0.5
-        v3 = [c_over_a * cosac,
-              c_over_a * (cosbc - cosac * cosab) / sinab,
-              c_over_a * ((1 + 2 * cosbc * cosac * cosab
-                           - cosbc**2 - cosac**2 - cosab**2)**0.5) / sinab]
-        cell = np.array([[1.0, 0.0, 0.0],
-                         [b_over_a * cosab, b_over_a * sinab, 0.0],
-                         v3]) * alat
-    else:
-        raise NotImplementedError('ibrav = {0} is not implemented'
-                                  ''.format(system['ibrav']))
-
-    return Cell(cell)
-
-
-def get_pseudo_dirs(data):
-    """Guess a list of possible locations for pseudopotential files.
-
-    Parameters
-    ----------
-    data : Namelist
-        Namelist representing the quantum espresso input parameters
-
-    Returns
-    -------
-    pseudo_dirs : list[str]
-        A list of directories where pseudopotential files could be located.
-    """
-    pseudo_dirs = []
-    if 'pseudo_dir' in data['control']:
-        pseudo_dirs.append(data['control']['pseudo_dir'])
-    if 'ESPRESSO_PSEUDO' in os.environ:
-        pseudo_dirs.append(os.environ['ESPRESSO_PSEUDO'])
-    pseudo_dirs.append(path.expanduser('~/espresso/pseudo/'))
-    return pseudo_dirs
-
-
-def get_valence_electrons(symbol, data, pseudo=None):
-    """The number of valence electrons for a atomic symbol.
-
-    Parameters
-    ----------
-    symbol : str
-        Chemical symbol
-
-    data : Namelist
-        Namelist representing the quantum espresso input parameters
-
-    pseudo : str, optional
-        File defining the pseudopotential to be used. If missing a fallback
-        to the number of valence electrons recommended at
-        http://materialscloud.org/sssp/ is employed.
-    """
-    if pseudo is None:
-        pseudo = '{}_dummy.UPF'.format(symbol)
-    for pseudo_dir in get_pseudo_dirs(data):
-        if path.exists(path.join(pseudo_dir, pseudo)):
-            valence = grep_valence(path.join(pseudo_dir, pseudo))
-            break
-    else:  # not found in a file
-        valence = SSSP_VALENCE[atomic_numbers[symbol]]
-    return valence
 
 
 def get_atomic_positions(lines, n_atoms, cell=None, alat=None):
@@ -791,7 +595,7 @@ def get_atomic_positions(lines, n_atoms, cell=None, alat=None):
 
     Returns
     -------
-    positions : list[(str, (float, float, float), (float, float, float))]
+    positions : list[(str, (float, float, float), (int, int, int))]
         A list of the ordered atomic positions in the format:
         label, (x, y, z), (if_x, if_y, if_z)
         Force multipliers are set to None if not present.
@@ -805,8 +609,7 @@ def get_atomic_positions(lines, n_atoms, cell=None, alat=None):
 
     positions = None
     # no blanks or comment lines, can the consume n_atoms lines for positions
-    trimmed_lines = (line for line in lines
-                     if line.strip() and not line[0] == '#')
+    trimmed_lines = (line for line in lines if line.strip() and line[0] != '#')
 
     for line in trimmed_lines:
         if line.strip().startswith('ATOMIC_POSITIONS'):
@@ -832,16 +635,14 @@ def get_atomic_positions(lines, n_atoms, cell=None, alat=None):
                 cell = np.identity(3) * alat
 
             positions = []
-            for _dummy in range(n_atoms):
+            for _ in range(n_atoms):
                 split_line = next(trimmed_lines).split()
                 # These can be fractions and other expressions
                 position = np.dot((infix_float(split_line[1]),
                                    infix_float(split_line[2]),
                                    infix_float(split_line[3])), cell)
                 if len(split_line) > 4:
-                    force_mult = (float(split_line[4]),
-                                  float(split_line[5]),
-                                  float(split_line[6]))
+                    force_mult = tuple(int(split_line[i]) for i in (4, 5, 6))
                 else:
                     force_mult = None
 
@@ -922,8 +723,7 @@ def get_cell_parameters(lines, alat=None):
     cell = None
     cell_alat = None
     # no blanks or comment lines, can take three lines for cell
-    trimmed_lines = (line for line in lines
-                     if line.strip() and not line[0] == '#')
+    trimmed_lines = (line for line in lines if line.strip() and line[0] != '#')
 
     for line in trimmed_lines:
         if line.strip().startswith('CELL_PARAMETERS'):
@@ -967,6 +767,66 @@ def get_cell_parameters(lines, alat=None):
     return cell, cell_alat
 
 
+def convert_constraint_flags(constraint_flags):
+    """Convert Quantum ESPRESSO constraint flags to ASE Constraint objects.
+
+    Parameters
+    ----------
+    constraint_flags : list[tuple[int, int, int]]
+        List of constraint flags (0: fixed, 1: moved) for all the atoms.
+        If the flag is None, there are no constraints on the atom.
+
+    Returns
+    -------
+    constraints : list[FixAtoms | FixCartesian]
+        List of ASE Constraint objects.
+    """
+    constraints = []
+    for i, constraint in enumerate(constraint_flags):
+        if constraint is None:
+            continue
+        # mask: False (0): moved, True (1): fixed
+        mask = ~np.asarray(constraint, bool)
+        constraints.append(FixCartesian(i, mask))
+    return canonicalize_constraints(constraints)
+
+
+def canonicalize_constraints(constraints):
+    """Canonicalize ASE FixCartesian constraints.
+
+    If the given FixCartesian constraints share the same `mask`, they can be
+    merged into one. Further, if `mask == (True, True, True)`, they can be
+    converted as `FixAtoms`. This method "canonicalizes" FixCartesian objects
+    in such a way.
+
+    Parameters
+    ----------
+    constraints : List[FixCartesian]
+        List of ASE FixCartesian constraints.
+
+    Returns
+    -------
+    constrants_canonicalized : List[FixAtoms | FixCartesian]
+        List of ASE Constraint objects.
+    """
+    # https://docs.python.org/3/library/collections.html#defaultdict-examples
+    indices_for_masks = defaultdict(list)
+    for constraint in constraints:
+        key = tuple((constraint.mask).tolist())
+        indices_for_masks[key].extend(constraint.index.tolist())
+
+    constraints_canonicalized = []
+    for mask, indices in indices_for_masks.items():
+        if mask == (False, False, False):  # no directions are fixed
+            continue
+        if mask == (True, True, True):  # all three directions are fixed
+            constraints_canonicalized.append(FixAtoms(indices))
+        else:
+            constraints_canonicalized.append(FixCartesian(indices, mask))
+
+    return constraints_canonicalized
+
+
 def str_to_value(string):
     """Attempt to convert string into int, float (including fortran double),
     or bool, in that order, otherwise return the string.
@@ -983,7 +843,6 @@ def str_to_value(string):
     value : any
         Parsed string as the most appropriate datatype of int, float,
         bool or string.
-
     """
 
     # Just an integer
@@ -1015,15 +874,13 @@ def read_fortran_namelist(fileobj):
     """Takes a fortran-namelist formatted file and returns nested
     dictionaries of sections and key-value data, followed by a list
     of lines of text that do not fit the specifications.
-
     Behaviour is taken from Quantum ESPRESSO 5.3. Parses fairly
     convoluted files the same way that QE should, but may not get
-    all the MANDATORY rules and edge cases for very non-standard files:
-        Ignores anything after '!' in a namelist, split pairs on ','
-        to include multiple key=values on a line, read values on section
-        start and end lines, section terminating character, '/', can appear
-        anywhere on a line.
-        All of these are ignored if the value is in 'quotes'.
+    all the MANDATORY rules and edge cases for very non-standard files
+    Ignores anything after '!' in a namelist, split pairs on ','
+    to include multiple key=values on a line, read values on section
+    start and end lines, section terminating character, '/', can appear
+    anywhere on a line. All of these are ignored if the value is in 'quotes'.
 
     Parameters
     ----------
@@ -1032,16 +889,15 @@ def read_fortran_namelist(fileobj):
 
     Returns
     -------
-    data : dict of dict
-        Dictionary for each section in the namelist with key = value
-        pairs of data.
-    card_lines : list of str
-        Any lines not used to create the data, assumed to belong to 'cards'
-        in the input file.
-
+    data : dict[str, dict]
+        Dictionary for each section in the namelist with
+        key = value pairs of data.
+    additional_cards : list[str]
+        Any lines not used to create the data,
+        assumed to belong to 'cards' in the input file.
     """
-    # Espresso requires the correct order
-    data = Namelist()
+
+    data = {}
     card_lines = []
     in_namelist = False
     section = 'none'  # can't be in a section without changing this
@@ -1056,7 +912,7 @@ def read_fortran_namelist(fileobj):
                 # Repeated sections are completely ignored.
                 # (Note that repeated keys overwrite within a section)
                 section = "_ignored"
-            data[section] = Namelist()
+            data[section] = {}
             in_namelist = True
         if not in_namelist and line:
             # Stripped line is Truthy, so safe to index first character
@@ -1094,7 +950,7 @@ def read_fortran_namelist(fileobj):
                 data[section][''.join(key).strip()] = str_to_value(
                     ''.join(value).strip())
 
-    return data, card_lines
+    return Namelist(data), card_lines
 
 
 def ffloat(string):
@@ -1167,7 +1023,7 @@ def label_to_symbol(label):
     if test_symbol in chemical_symbols:
         return test_symbol
     else:
-        raise KeyError('Could not parse species from label {0}.'
+        raise KeyError('Could not parse species from label {}.'
                        ''.format(label))
 
 
@@ -1220,79 +1076,10 @@ def infix_float(text):
 
     while '(' in text:
         middle = middle_brackets(text)
-        text = text.replace(middle, '{}'.format(eval_no_bracket_expr(middle)))
+        text = text.replace(middle, f'{eval_no_bracket_expr(middle)}')
 
     return float(eval_no_bracket_expr(text))
 
-###
-# Input file writing
-###
-
-
-# Ordered and case insensitive
-KEYS = Namelist((
-    ('CONTROL', [
-        'calculation', 'title', 'verbosity', 'restart_mode', 'wf_collect',
-        'nstep', 'iprint', 'tstress', 'tprnfor', 'dt', 'outdir', 'wfcdir',
-        'prefix', 'lkpoint_dir', 'max_seconds', 'etot_conv_thr',
-        'forc_conv_thr', 'disk_io', 'pseudo_dir', 'tefield', 'dipfield',
-        'lelfield', 'nberrycyc', 'lorbm', 'lberry', 'gdir', 'nppstr',
-        'lfcp', 'trism', 'monopole']),
-    ('SYSTEM', [
-        'ibrav', 'nat', 'ntyp', 'nbnd', 'tot_charge', 'starting_charge',
-        'tot_magnetization',
-        'starting_magnetization', 'ecutwfc', 'ecutrho', 'ecutfock', 'nr1',
-        'nr2', 'nr3', 'nr1s', 'nr2s', 'nr3s', 'nosym', 'nosym_evc', 'noinv',
-        'no_t_rev', 'force_symmorphic', 'use_all_frac', 'occupations',
-        'one_atom_occupations', 'starting_spin_angle', 'degauss', 'smearing',
-        'nspin', 'noncolin', 'ecfixed', 'qcutz', 'q2sigma', 'input_dft',
-        'exx_fraction', 'screening_parameter', 'exxdiv_treatment',
-        'x_gamma_extrapolation', 'ecutvcut', 'nqx1', 'nqx2', 'nqx3',
-        'lda_plus_u', 'lda_plus_u_kind', 'Hubbard_U', 'Hubbard_J0',
-        'Hubbard_alpha', 'Hubbard_beta', 'Hubbard_J',
-        'starting_ns_eigenvalue', 'U_projection_type', 'edir',
-        'emaxpos', 'eopreg', 'eamp', 'angle1', 'angle2',
-        'constrained_magnetization', 'fixed_magnetization', 'lambda',
-        'report', 'lspinorb', 'assume_isolated', 'esm_bc', 'esm_w',
-        'esm_efield', 'esm_nfit', 'lgcscf', 'gcscf_mu', 'gcscf_conv_thr',
-        'gcscf_beta', 'fcp_mu', 'vdw_corr', 'london',
-        'london_s6', 'london_c6', 'london_rvdw', 'london_rcut',
-        'ts_vdw_econv_thr', 'ts_vdw_isolated', 'xdm', 'xdm_a1', 'xdm_a2',
-        'space_group', 'uniqueb', 'origin_choice', 'rhombohedral', 'zmon',
-        'realxz', 'block', 'block_1', 'block_2', 'block_height']),
-    ('ELECTRONS', [
-        'electron_maxstep', 'scf_must_converge', 'conv_thr', 'adaptive_thr',
-        'conv_thr_init', 'conv_thr_multi', 'mixing_mode', 'mixing_beta',
-        'mixing_ndim', 'mixing_fixed_ns', 'diagonalization', 'ortho_para',
-        'diago_thr_init', 'diago_cg_maxiter', 'diago_david_ndim',
-        'diago_full_acc', 'diago_rmm_ndim', 'diago_rmm_conv',
-        'diago_gs_nblock', 'efield', 'efield_cart', 'efield_phase',
-        'startingpot', 'startingwfc', 'tqr']),
-    ('IONS', [
-        'ion_dynamics', 'ion_positions', 'pot_extrapolation',
-        'wfc_extrapolation', 'remove_rigid_rot', 'ion_temperature', 'tempw',
-        'tolp', 'delta_t', 'nraise', 'refold_pos', 'upscale', 'bfgs_ndim',
-        'trust_radius_max', 'trust_radius_min', 'trust_radius_ini', 'w_1',
-        'w_2']),
-    ('CELL', [
-        'cell_dynamics', 'press', 'wmass', 'cell_factor', 'press_conv_thr',
-        'cell_dofree']),
-    ('FCP', [
-        'fcp_mu', 'fcp_dynamics', 'fcp_conv_thr', 'fcp_ndiis', 'fcp_mass',
-        'fcp_velocity', 'fcp_temperature', 'fcp_tempw', 'fcp_tolp',
-        'fcp_delta_t', 'fcp_nraise', 'freeze_all_atoms']),
-    ('RISM', [
-        'nsolv', 'closure', 'tempv', 'ecutsolv',
-        'solute_lj', 'solute_epsilon', 'solute_sigma', 'starting1d',
-        'starting3d', 'smear1d', 'smear3d', 'rism1d_maxstep',
-        'rism3d_maxstep', 'rism1d_conv_thr', 'rism3d_conv_thr',
-        'mdiis1d_size', 'mdiis3d_size', 'mdiis1d_step', 'mdiis3d_step',
-        'rism1d_bond_width', 'rism1d_dielectric', 'rism1d_molesize',
-        'rism1d_nproc', 'rism3d_conv_level', 'rism3d_planar_average',
-        'laue_nfit', 'laue_expand_right', 'laue_expand_left', 'laue_starting_right',
-        'laue_starting_left', 'laue_buffer_right', 'laue_buffer_left',
-        'laue_both_hands', 'laue_wall', 'laue_wall_z', 'laue_wall_rho',
-        'laue_wall_epsilon', 'laue_wall_sigma', 'laue_wall_lj6'])))
 
 # Number of valence electrons in the pseudopotentials recommended by
 # http://materialscloud.org/sssp/. These are just used as a fallback for
@@ -1306,145 +1093,6 @@ SSSP_VALENCE = [
     7.0, 18.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0,
     19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 36.0, 27.0, 14.0, 15.0, 30.0,
     15.0, 32.0, 19.0, 12.0, 13.0, 14.0, 15.0, 16.0, 18.0]
-
-
-def construct_namelist(parameters=None, warn=False, **kwargs):
-    """
-    Construct an ordered Namelist containing all the parameters given (as
-    a dictionary or kwargs). Keys will be inserted into their appropriate
-    section in the namelist and the dictionary may contain flat and nested
-    structures. Any kwargs that match input keys will be incorporated into
-    their correct section. All matches are case-insensitive, and returned
-    Namelist object is a case-insensitive dict.
-
-    If a key is not known to ase, but in a section within `parameters`,
-    it will be assumed that it was put there on purpose and included
-    in the output namelist. Anything not in a section will be ignored (set
-    `warn` to True to see ignored keys).
-
-    Keys with a dimension (e.g. Hubbard_U(1)) will be incorporated as-is
-    so the `i` should be made to match the output.
-
-    The priority of the keys is:
-        kwargs[key] > parameters[key] > parameters[section][key]
-    Only the highest priority item will be included.
-
-    Parameters
-    ----------
-    parameters: dict
-        Flat or nested set of input parameters.
-    warn: bool
-        Enable warnings for unused keys.
-
-    Returns
-    -------
-    input_namelist: Namelist
-        pw.x compatible namelist of input parameters.
-
-    """
-    # Convert everything to Namelist early to make case-insensitive
-    if parameters is None:
-        parameters = Namelist()
-    else:
-        # Maximum one level of nested dict
-        # Don't modify in place
-        parameters_namelist = Namelist()
-        for key, value in parameters.items():
-            if isinstance(value, dict):
-                parameters_namelist[key] = Namelist(value)
-            else:
-                parameters_namelist[key] = value
-        parameters = parameters_namelist
-
-    # Just a dict
-    kwargs = Namelist(kwargs)
-
-    # Final parameter set
-    input_namelist = Namelist()
-
-    # Collect
-    for section in KEYS:
-        sec_list = Namelist()
-        for key in KEYS[section]:
-            # Check all three separately and pop them all so that
-            # we can check for missing values later
-            if key in parameters.get(section, {}):
-                sec_list[key] = parameters[section].pop(key)
-            if key in parameters:
-                sec_list[key] = parameters.pop(key)
-            if key in kwargs:
-                sec_list[key] = kwargs.pop(key)
-
-            # Check if there is a key(i) version (no extra parsing)
-            for arg_key in list(parameters.get(section, {})):
-                if arg_key.split('(')[0].strip().lower() == key.lower():
-                    sec_list[arg_key] = parameters[section].pop(arg_key)
-            cp_parameters = parameters.copy()
-            for arg_key in cp_parameters:
-                if arg_key.split('(')[0].strip().lower() == key.lower():
-                    sec_list[arg_key] = parameters.pop(arg_key)
-            cp_kwargs = kwargs.copy()
-            for arg_key in cp_kwargs:
-                if arg_key.split('(')[0].strip().lower() == key.lower():
-                    sec_list[arg_key] = kwargs.pop(arg_key)
-
-        # Add to output
-        input_namelist[section] = sec_list
-
-    unused_keys = list(kwargs)
-    # pass anything else already in a section
-    for key, value in parameters.items():
-        if key in KEYS and isinstance(value, dict):
-            input_namelist[key].update(value)
-        elif isinstance(value, dict):
-            unused_keys.extend(list(value))
-        else:
-            unused_keys.append(key)
-
-    if warn and unused_keys:
-        warnings.warn('Unused keys: {}'.format(', '.join(unused_keys)))
-
-    return input_namelist
-
-
-def grep_valence(pseudopotential):
-    """
-    Given a UPF pseudopotential file, find the number of valence atoms.
-
-    Parameters
-    ----------
-    pseudopotential: str
-        Filename of the pseudopotential.
-
-    Returns
-    -------
-    valence: float
-        Valence as reported in the pseudopotential.
-
-    Raises
-    ------
-    ValueError
-        If valence cannot be found in the pseudopotential.
-    """
-
-    # Example lines
-    # Sr.pbe-spn-rrkjus_psl.1.0.0.UPF:        z_valence="1.000000000000000E+001"
-    # C.pbe-n-kjpaw_psl.1.0.0.UPF (new ld1.x):
-    #                            ...PBC" z_valence="4.000000000000e0" total_p...
-    # C_ONCV_PBE-1.0.upf:                     z_valence="    4.00"
-    # Ta_pbe_v1.uspp.F.UPF:   13.00000000000      Z valence
-
-    with open(pseudopotential) as psfile:
-        for line in psfile:
-            if 'z valence' in line.lower():
-                return float(line.split()[0])
-            elif 'z_valence' in line.lower():
-                if line.split()[0] == '<PP_HEADER':
-                    line = list(filter(lambda x: 'z_valence' in x,
-                                       line.split(' ')))[0]
-                return float(line.split('=')[-1].strip().strip('"'))
-        else:
-            raise ValueError('Valence missing in {}'.format(pseudopotential))
 
 
 def kspacing_to_grid(atoms, spacing, calculated_spacing=None):
@@ -1532,14 +1180,15 @@ def format_atom_position(atom, crystal_coordinates, mask='', tidx=None):
     return astr
 
 
+@writer
 def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
                       kspacing=None, kpts=None, koffset=(0, 0, 0),
                       crystal_coordinates=False, additional_cards=None,
-                      solvents=None, **kwargs):
+                      solvents_info=None, **kwargs):
     """
     Create an input file for pw.x.
 
-    Use set_initial_magnetic_moments to turn on spin, if ispin is set to 2
+    Use set_initial_magnetic_moments to turn on spin, if nspin is set to 2
     with no magnetic moments, they will all be set to 0.0. Magnetic moments
     will be converted to the QE units (fraction of valence electrons) using
     any pseudopotential files found, or a best guess for the number of
@@ -1554,9 +1203,9 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
     Implemented features:
 
     - Conversion of :class:`ase.constraints.FixAtoms` and
-                    :class:`ase.constraints.FixCartesian`.
-    - `starting_magnetization` derived from the `mgmoms` and pseudopotentials
-      (searches default paths for pseudo files.)
+      :class:`ase.constraints.FixCartesian`.
+    - ``starting_magnetization`` derived from the ``magmoms`` and
+      pseudopotentials (searches default paths for pseudo files.)
     - Automatic assignment of options to their correct sections.
 
     Not implemented:
@@ -1567,14 +1216,13 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
     - Hubbard parameters
     - Validation of the argument types for input
     - Validation of required options
-    - Noncollinear magnetism
 
     Parameters
     ----------
-    fd: file
-        A file like object to write the input file to.
+    fd: file | str
+        A file to which the input is written.
     atoms: Atoms
-        A single atomistic configuration to write to `fd`.
+        A single atomistic configuration to write to ``fd``.
     input_data: dict
         A flat or nested dictionary with input parameters for pw.x
     pseudopotentials: dict
@@ -1610,25 +1258,25 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
     # Convert to a namelist to make working with parameters much easier
     # Note that the name ``input_data`` is chosen to prevent clash with
     # ``parameters`` in Calculator objects
-    input_parameters = construct_namelist(input_data, **kwargs)
+    input_parameters = Namelist(input_data)
+    input_parameters.to_nested('pw', **kwargs)
 
     # Convert ase constraints to QE constraints
     # Nx3 array of force multipliers matches what QE uses
     # Do this early so it is available when constructing the atoms card
-    constraint_mask = np.ones((len(atoms), 3), dtype='int')
+    moved = np.ones((len(atoms), 3), dtype=bool)
     for constraint in atoms.constraints:
         if isinstance(constraint, FixAtoms):
-            constraint_mask[constraint.index] = 0
+            moved[constraint.index] = False
         elif isinstance(constraint, FixCartesian):
-            constraint_mask[constraint.a] = constraint.mask
+            moved[constraint.index] = ~constraint.mask
         else:
-            warnings.warn('Ignored unknown constraint {}'.format(constraint))
+            warnings.warn(f'Ignored unknown constraint {constraint}')
     masks = []
     for atom in atoms:
         # only inclued mask if something is fixed
-        if not all(constraint_mask[atom.index]):
-            mask = ' {mask[0]} {mask[1]} {mask[2]}'.format(
-                mask=constraint_mask[atom.index])
+        if not all(moved[atom.index]):
+            mask = ' {:d} {:d} {:d}'.format(*moved[atom.index])
         else:
             mask = ''
         masks.append(mask)
@@ -1641,45 +1289,47 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
     for species in set(atoms.get_chemical_symbols()):
         # Look in all possible locations for the pseudos and try to figure
         # out the number of valence electrons
-        pseudo = pseudopotentials.get(species, None)
-        valence = get_valence_electrons(species, input_parameters, pseudo)
-        species_info[species] = {'pseudo': pseudo, 'valence': valence}
+        pseudo = pseudopotentials[species]
+        species_info[species] = {'pseudo': pseudo}
 
     # Convert atoms into species.
     # Each different magnetic moment needs to be a separate type even with
     # the same pseudopotential (e.g. an up and a down for AFM).
     # if any magmom are > 0 or nspin == 2 then use species labels.
     # Rememeber: magnetisation uses 1 based indexes
-    atomic_species = OrderedDict()
+    atomic_species = {}
     atomic_species_str = []
     atomic_positions_str = []
 
     nspin = input_parameters['system'].get('nspin', 1)  # 1 is the default
+    noncolin = input_parameters['system'].get('noncolin', False)
+    rescale_magmom_fac = kwargs.get('rescale_magmom_fac', 1.0)
     if any(atoms.get_initial_magnetic_moments()):
-        if nspin == 1:
+        if nspin == 1 and not noncolin:
             # Force spin on
             input_parameters['system']['nspin'] = 2
             nspin = 2
 
-    if nspin == 2:
-        # Spin on
+    if nspin == 2 or noncolin:
+        # Magnetic calculation on
         for atom, mask, magmom in zip(
                 atoms, masks, atoms.get_initial_magnetic_moments()):
             if (atom.symbol, magmom) not in atomic_species:
-                # spin as fraction of valence
-                fspin = float(magmom) / species_info[atom.symbol]['valence']
+                # for qe version 7.2 or older magmon must be rescale by
+                # about a factor 10 to assume sensible values
+                # since qe-v7.3 magmom values will be provided unscaled
+                fspin = float(magmom) / rescale_magmom_fac
                 # Index in the atomic species list
                 sidx = len(atomic_species) + 1
                 # Index for that atom type; no index for first one
                 tidx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
                 atomic_species[(atom.symbol, magmom)] = (sidx, tidx)
                 # Add magnetization to the input file
-                mag_str = 'starting_magnetization({0})'.format(sidx)
+                mag_str = f"starting_magnetization({sidx})"
                 input_parameters['system'][mag_str] = fspin
+                species_pseudo = species_info[atom.symbol]['pseudo']
                 atomic_species_str.append(
-                    '{species}{tidx} {mass} {pseudo}\n'.format(
-                        species=atom.symbol, tidx=tidx, mass=atom.mass,
-                        pseudo=species_info[atom.symbol]['pseudo']))
+                    f"{atom.symbol}{tidx} {atom.mass} {species_pseudo}\n")
             # lookup tidx to append to name
             sidx, tidx = atomic_species[(atom.symbol, magmom)]
             # construct line for atomic positions
@@ -1692,15 +1342,20 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
         for atom, mask in zip(atoms, masks):
             if atom.symbol not in atomic_species:
                 atomic_species[atom.symbol] = True  # just a placeholder
+                species_pseudo = species_info[atom.symbol]['pseudo']
                 atomic_species_str.append(
-                    '{species} {mass} {pseudo}\n'.format(
-                        species=atom.symbol, mass=atom.mass,
-                        pseudo=species_info[atom.symbol]['pseudo']))
+                    f"{atom.symbol} {atom.mass} {species_pseudo}\n")
             # construct line for atomic positions
             atomic_positions_str.append(
                 format_atom_position(atom, crystal_coordinates, mask=mask)
             )
-# from this line script made by Hori.
+
+    # Add computed parameters
+    # different magnetisms means different types
+    input_parameters['system']['ntyp'] = len(atomic_species)
+    input_parameters['system']['nat'] = len(atoms)
+
+# from this line, script made by Hori.
     siax=1
     if any(atoms.get_solute_ljs()):
         for atom, solute_lj in zip(atoms, atoms.get_solute_ljs()):
@@ -1715,39 +1370,61 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
         pass
 
 # solute_epsilonとsolute_sigmaの値が同じ場合は、solute_epsilonしか出力されないため注意。
+# solute_epsilonとsolute_sigmaのNoneを識別するために'3.141592'と'2.718281'を使用。実際の値として使用しない。
+
 
     sibx=1
     if any(atoms.get_solute_epsilons()):
-        for atom, solute_epsilon in zip(atoms, atoms.get_solute_epsilons()):
+        check_epsilon=[]
+        for j in atoms.get_solute_epsilons():
+            if np.isnan(j):
+                check_epsilon.append(3.141592)
+            else:
+                check_epsilon.append(j)
+        
+        for atom, solute_epsilon in zip(atoms, np.array(check_epsilon)):
             if (atom.symbol, solute_epsilon) not in atomic_species:
-                tibx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
-                atomic_species[(atom.symbol, solute_epsilon)] = (sibx, tibx)
-                # Add solute_lj to the input parameter
-                solute_epsilon_str = 'solute_epsilon({0})'.format(sibx)
-                input_parameters['rism'][solute_epsilon_str] = float(solute_epsilon)
-                sibx += 1
+                if solute_epsilon == 3.141592:
+                    tibx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
+                    atomic_species[(atom.symbol, solute_epsilon)] = (sibx, tibx)
+                    sibx += 1
+                else:
+                    tibx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
+                    atomic_species[(atom.symbol, solute_epsilon)] = (sibx, tibx)
+                    # Add solute_epsilon to the input parameter
+                    solute_epsilon_str = 'solute_epsilon({0})'.format(sibx)
+                    input_parameters['rism'][solute_epsilon_str] = float(solute_epsilon)
+                    sibx += 1
     else:
         pass
 
     sicx=1
     if any(atoms.get_solute_sigmas()):
-        for atom, solute_sigma in zip(atoms, atoms.get_solute_sigmas()):
+        check_sigma=[]
+        for j in atoms.get_solute_sigmas():
+            if np.isnan(j):
+                check_sigma.append(2.718281)
+            else:
+                check_sigma.append(j)
+        
+        for atom, solute_sigma in zip(atoms, np.array(check_sigma)):
             if (atom.symbol, solute_sigma) not in atomic_species:
-                ticx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
-                atomic_species[(atom.symbol, solute_sigma)] = (sicx, ticx)
-                # Add solute_lj to the input parameter
-                solute_sigma_str = 'solute_sigma({0})'.format(sicx)
-                input_parameters['rism'][solute_sigma_str] = float(solute_sigma)
-                sicx += 1
+                if solute_sigma == 2.718281:
+                    ticx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
+                    atomic_species[(atom.symbol, solute_sigma)] = (sicx, ticx)
+                    sicx += 1
+                
+                else:
+                    ticx = sum(atom.symbol == x[0] for x in atomic_species) or ' '
+                    atomic_species[(atom.symbol, solute_sigma)] = (sicx, ticx)
+                    # Add solute_sigma to the input parameter
+                    solute_sigma_str = 'solute_sigma({0})'.format(sicx)
+                    input_parameters['rism'][solute_sigma_str] = float(solute_sigma)
+                    sicx += 1
     else:
         pass
 
 # until this line.
-
-    # Add computed parameters
-    # different magnetisms means different types
-    input_parameters['system']['ntyp'] = len(atomic_species)
-    input_parameters['system']['nat'] = len(atoms)
 
     # Use cell as given or fit to a specific ibrav
     if 'ibrav' in input_parameters['system']:
@@ -1758,37 +1435,29 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
         # Just use standard cell block
         input_parameters['system']['ibrav'] = 0
 
-    # Construct input file into this
-    pwi = []
+    # Construct solvent information
+    if 'trism' in input_parameters['control']:
+        solvents_str = []
+        for solvent in solvents_info.keys():
+            if solvent != 'density_unit':
+                solvents_str.append(
+                    '{solvent}  {density}  {mol}\n'.format(
+                        solvent=solvent, density=solvents_info[solvent][0],
+                        mol=solvents_info[solvent][1]))
 
-    # Assume sections are ordered (taken care of in namelist construction)
-    # and that repr converts to a QE readable representation (except bools)
-    for section in input_parameters:
-        pwi.append('&{0}\n'.format(section.upper()))
-        for key, value in input_parameters[section].items():
-            if value is True:
-                pwi.append('   {0:16} = .true.\n'.format(key))
-            elif value is False:
-                pwi.append('   {0:16} = .false.\n'.format(key))
-            else:
-                # repr format to get quotes around strings
-                pwi.append('   {0:16} = {1!r:}\n'.format(key, value))
-        pwi.append('/\n')  # terminate section
-    pwi.append('\n')
+    # Construct input file into this
+    pwi = input_parameters.to_string(list_form=True)
+
+    if solvents_info is not None:
+        unit_str = solvents_info.get('density_unit')
+        pwi.append('SOLVENTS   {' + unit_str + '}\n')
+        pwi.extend(solvents_str)
+        pwi.append('\n')
 
     # Pseudopotentials
     pwi.append('ATOMIC_SPECIES\n')
     pwi.extend(atomic_species_str)
     pwi.append('\n')
-
-    # Solvents information for the calculation of ESM-RISM
-    if isinstance(solvents, list):
-        pwi.append('SOLVENTS mol/L\n')
-        for i in range(len(solvents)):
-            pwi.append('{species} {mol_L} {mol_file}\n'.format(
-                            species=solvents[i]['species'], mol_L=solvents[i]['mol_L'],
-                            mol_file=solvents[i]['mol_file']))
-        pwi.append('\n')
 
     # KPOINTS - add a MP grid as required
     if kspacing is not None:
@@ -1814,17 +1483,17 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
         pwi.append('K_POINTS crystal_b\n')
         assert hasattr(kgrid, 'path') or 'path' in kgrid
         kgrid = kpts2ndarray(kgrid, atoms=atoms)
-        pwi.append('%s\n' % len(kgrid))
+        pwi.append(f'{len(kgrid)}\n')
         for k in kgrid:
-            pwi.append('{k[0]:.14f} {k[1]:.14f} {k[2]:.14f} 0\n'.format(k=k))
+            pwi.append(f"{k[0]:.14f} {k[1]:.14f} {k[2]:.14f} 0\n")
         pwi.append('\n')
     elif isinstance(kgrid, str) and (kgrid == "gamma"):
         pwi.append('K_POINTS gamma\n')
         pwi.append('\n')
     else:
         pwi.append('K_POINTS automatic\n')
-        pwi.append('{0[0]} {0[1]} {0[2]}  {1[0]:d} {1[1]:d} {1[2]:d}\n'
-                   ''.format(kgrid, koffset))
+        pwi.append(f"{kgrid[0]} {kgrid[1]} {kgrid[2]} "
+                   f" {koffset[0]:d} {koffset[1]:d} {koffset[2]:d}\n")
         pwi.append('\n')
 
     # CELL block, if required
@@ -1846,10 +1515,644 @@ def write_espresso_in(fd, atoms, input_data=None, pseudopotentials=None,
 
     # DONE!
     fd.write(''.join(pwi))
-    
+
     if additional_cards:
         if isinstance(additional_cards, list):
             additional_cards = "\n".join(additional_cards)
             additional_cards += "\n"
 
         fd.write(additional_cards)
+
+
+def write_espresso_ph(
+        fd,
+        input_data=None,
+        qpts=None,
+        nat_todo_indices=None,
+        **kwargs) -> None:
+    """
+    Function that write the input file for a ph.x calculation. Normal namelist
+    cards are passed in the input_data dictionary. Which can be either nested
+    or flat, ASE style. The q-points are passed in the qpts list. If qplot is
+    set to True then qpts is expected to be a list of list|tuple of length 4.
+    Where the first three elements are the coordinates of the q-point in units
+    of 2pi/alat and the last element is the weight of the q-point. if qplot is
+    set to False then qpts is expected to be a simple list of length 4 (single
+    q-point). Finally if ldisp is set to True, the above is discarded and the
+    q-points are read from the nq1, nq2, nq3 cards in the input_data dictionary.
+
+    Additionally, a nat_todo_indices kwargs (list[int]) can be specified in the
+    kwargs. It will be used if nat_todo is set to True in the input_data
+    dictionary.
+
+    Globally, this function follows the convention set in the ph.x documentation
+    (https://www.quantum-espresso.org/Doc/INPUT_PH.html)
+
+    Parameters
+    ----------
+    fd
+        The file descriptor of the input file.
+
+    kwargs
+        kwargs dictionary possibly containing the following keys:
+
+        - input_data: dict
+        - qpts: list[list[float]] | list[tuple[float]] | list[float]
+        - nat_todo_indices: list[int]
+
+    Returns
+    -------
+    None
+    """
+
+    input_data = Namelist(input_data)
+    input_data.to_nested('ph', **kwargs)
+
+    input_ph = input_data["inputph"]
+
+    inp_nat_todo = input_ph.get("nat_todo", 0)
+    qpts = qpts or (0, 0, 0)
+
+    pwi = input_data.to_string()
+
+    fd.write(pwi)
+
+    qplot = input_ph.get("qplot", False)
+    ldisp = input_ph.get("ldisp", False)
+
+    if qplot:
+        fd.write(f"{len(qpts)}\n")
+        for qpt in qpts:
+            fd.write(
+                f"{qpt[0]:0.8f} {qpt[1]:0.8f} {qpt[2]:0.8f} {qpt[3]:1d}\n"
+            )
+    elif not (qplot or ldisp):
+        fd.write(f"{qpts[0]:0.8f} {qpts[1]:0.8f} {qpts[2]:0.8f}\n")
+    if inp_nat_todo:
+        tmp = [str(i) for i in nat_todo_indices]
+        fd.write(" ".join(tmp))
+        fd.write("\n")
+
+
+def read_espresso_ph(fileobj):
+    """
+    Function that reads the output of a ph.x calculation.
+    It returns a dictionary where each q-point number is a key and
+    the value is a dictionary with the following keys if available:
+
+    - qpoints: The q-point in cartesian coordinates.
+    - kpoints: The k-points in cartesian coordinates.
+    - dieltensor: The dielectric tensor.
+    - borneffcharge: The effective Born charges.
+    - borneffcharge_dfpt: The effective Born charges from DFPT.
+    - polarizability: The polarizability tensor.
+    - modes: The phonon modes.
+    - eqpoints: The symmetrically equivalent q-points.
+    - freqs: The phonon frequencies.
+    - mode_symmetries: The symmetries of the modes.
+    - atoms: The atoms object.
+
+    Some notes:
+
+        - For some reason, the cell is not defined to high level of
+          precision in ph.x outputs. Be careful when using the atoms object
+          retrieved from this function.
+        - This function can be called on incomplete calculations i.e.
+          if the calculation couldn't diagonalize the dynamical matrix
+          for some q-points, the results for the other q-points will
+          still be returned.
+
+    Parameters
+    ----------
+    fileobj
+        The file descriptor of the output file.
+
+    Returns
+    -------
+    dict
+        The results dictionnary as described above.
+    """
+    freg = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+\-]?\d+)?")
+
+    QPOINTS = r"(?i)^\s*Calculation\s*of\s*q"
+    NKPTS = r"(?i)^\s*number\s*of\s*k\s*points\s*"
+    DIEL = r"(?i)^\s*Dielectric\s*constant\s*in\s*cartesian\s*axis\s*$"
+    BORN = r"(?i)^\s*Effective\s*charges\s*\(d\s*Force\s*/\s*dE\)"
+    POLA = r"(?i)^\s*Polarizability\s*(a.u.)\^3"
+    REPR = r"(?i)^\s*There\s*are\s*\d+\s*irreducible\s*representations\s*$"
+    EQPOINTS = r"(?i)^\s*Number\s*of\s*q\s*in\s*the\s*star\s*=\s*"
+    DIAG = r"(?i)^\s*Diagonalizing\s*the\s*dynamical\s*matrix\s*$"
+    MODE_SYM = r"(?i)^\s*Mode\s*symmetry,\s*"
+    BORN_DFPT = r"(?i)^\s*Effective\s*charges\s*\(d\s*P\s*/\s*du\)"
+    POSITIONS = r"(?i)^\s*site\s*n\..*\(alat\s*units\)"
+    ALAT = r"(?i)^\s*celldm\(1\)="
+    CELL = (
+        r"^\s*crystal\s*axes:\s*\(cart.\s*coord.\s*in\s*units\s*of\s*alat\)"
+    )
+    ELECTRON_PHONON = r"(?i)^\s*electron-phonon\s*interaction\s*...\s*$"
+
+    output = {
+        QPOINTS: [],
+        NKPTS: [],
+        DIEL: [],
+        BORN: [],
+        BORN_DFPT: [],
+        POLA: [],
+        REPR: [],
+        EQPOINTS: [],
+        DIAG: [],
+        MODE_SYM: [],
+        POSITIONS: [],
+        ALAT: [],
+        CELL: [],
+        ELECTRON_PHONON: [],
+    }
+
+    names = {
+        QPOINTS: "qpoints",
+        NKPTS: "kpoints",
+        DIEL: "dieltensor",
+        BORN: "borneffcharge",
+        BORN_DFPT: "borneffcharge_dfpt",
+        POLA: "polarizability",
+        REPR: "representations",
+        EQPOINTS: "eqpoints",
+        DIAG: "freqs",
+        MODE_SYM: "mode_symmetries",
+        POSITIONS: "positions",
+        ALAT: "alat",
+        CELL: "cell",
+        ELECTRON_PHONON: "ep_data",
+    }
+
+    unique = {
+        QPOINTS: True,
+        NKPTS: False,
+        DIEL: True,
+        BORN: True,
+        BORN_DFPT: True,
+        POLA: True,
+        REPR: True,
+        EQPOINTS: True,
+        DIAG: True,
+        MODE_SYM: True,
+        POSITIONS: True,
+        ALAT: True,
+        CELL: True,
+        ELECTRON_PHONON: True,
+    }
+
+    results = {}
+    fdo_lines = [i for i in fileobj.read().splitlines() if i]
+    n_lines = len(fdo_lines)
+
+    for idx, line in enumerate(fdo_lines):
+        for key in output:
+            if bool(re.match(key, line)):
+                output[key].append(idx)
+
+    output = {key: np.array(value) for key, value in output.items()}
+
+    def _read_qpoints(idx):
+        match = re.findall(freg, fdo_lines[idx])
+        return tuple(round(float(x), 7) for x in match)
+
+    def _read_kpoints(idx):
+        n_kpts = int(re.findall(freg, fdo_lines[idx])[0])
+        kpts = []
+        for line in fdo_lines[idx + 2: idx + 2 + n_kpts]:
+            if bool(re.search(r"^\s*k\(.*wk", line)):
+                kpts.append([round(float(x), 7)
+                            for x in re.findall(freg, line)[1:]])
+        return np.array(kpts)
+
+    def _read_repr(idx):
+        n_repr, curr, n = int(re.findall(freg, fdo_lines[idx])[0]), 0, 0
+        representations = {}
+        while idx + n < n_lines:
+            if re.search(r"^\s*Representation.*modes", fdo_lines[idx + n]):
+                curr = int(re.findall(freg, fdo_lines[idx + n])[0])
+                representations[curr] = {"done": False, "modes": []}
+            if re.search(r"Calculated\s*using\s*symmetry", fdo_lines[idx + n]) \
+                    or re.search(r"-\s*Done\s*$", fdo_lines[idx + n]):
+                representations[curr]["done"] = True
+            if re.search(r"(?i)^\s*(mode\s*#\s*\d\s*)+", fdo_lines[idx + n]):
+                representations[curr]["modes"] = _read_modes(idx + n)
+                if curr == n_repr:
+                    break
+            n += 1
+        return representations
+
+    def _read_modes(idx):
+        n = 1
+        n_modes = len(re.findall(r"mode", fdo_lines[idx]))
+        modes = []
+        while not modes or bool(re.match(r"^\s*\(", fdo_lines[idx + n])):
+            tmp = re.findall(freg, fdo_lines[idx + n])
+            modes.append([round(float(x), 5) for x in tmp])
+            n += 1
+        return np.hsplit(np.array(modes), n_modes)
+
+    def _read_eqpoints(idx):
+        n_star = int(re.findall(freg, fdo_lines[idx])[0])
+        return np.loadtxt(
+            fdo_lines[idx + 2: idx + 2 + n_star], usecols=(1, 2, 3)
+        ).reshape(-1, 3)
+
+    def _read_freqs(idx):
+        n = 0
+        freqs = []
+        stop = 0
+        while not freqs or stop < 2:
+            if bool(re.search(r"^\s*freq", fdo_lines[idx + n])):
+                tmp = re.findall(freg, fdo_lines[idx + n])[1]
+                freqs.append(float(tmp))
+            if bool(re.search(r"\*{5,}", fdo_lines[idx + n])):
+                stop += 1
+            n += 1
+        return np.array(freqs)
+
+    def _read_sym(idx):
+        n = 1
+        sym = {}
+        while bool(re.match(r"^\s*freq", fdo_lines[idx + n])):
+            r = re.findall("\\d+", fdo_lines[idx + n])
+            r = tuple(range(int(r[0]), int(r[1]) + 1))
+            sym[r] = fdo_lines[idx + n].split("-->")[1].strip()
+            sym[r] = re.sub(r"\s+", " ", sym[r])
+            n += 1
+        return sym
+
+    def _read_epsil(idx):
+        epsil = np.zeros((3, 3))
+        for n in range(1, 4):
+            tmp = re.findall(freg, fdo_lines[idx + n])
+            epsil[n - 1] = [round(float(x), 9) for x in tmp]
+        return epsil
+
+    def _read_born(idx):
+        n = 1
+        born = []
+        while idx + n < n_lines:
+            if re.search(r"^\s*atom\s*\d\s*\S", fdo_lines[idx + n]):
+                pass
+            elif re.search(r"^\s*E\*?(x|y|z)\s*\(", fdo_lines[idx + n]):
+                tmp = re.findall(freg, fdo_lines[idx + n])
+                born.append([round(float(x), 5) for x in tmp])
+            else:
+                break
+            n += 1
+        born = np.array(born)
+        return np.vsplit(born, len(born) // 3)
+
+    def _read_born_dfpt(idx):
+        n = 1
+        born = []
+        while idx + n < n_lines:
+            if re.search(r"^\s*atom\s*\d\s*\S", fdo_lines[idx + n]):
+                pass
+            elif re.search(r"^\s*P(x|y|z)\s*\(", fdo_lines[idx + n]):
+                tmp = re.findall(freg, fdo_lines[idx + n])
+                born.append([round(float(x), 5) for x in tmp])
+            else:
+                break
+            n += 1
+        born = np.array(born)
+        return np.vsplit(born, len(born) // 3)
+
+    def _read_pola(idx):
+        pola = np.zeros((3, 3))
+        for n in range(1, 4):
+            tmp = re.findall(freg, fdo_lines[idx + n])[:3]
+            pola[n - 1] = [round(float(x), 2) for x in tmp]
+        return pola
+
+    def _read_positions(idx):
+        positions = []
+        symbols = []
+        n = 1
+        while re.findall(r"^\s*\d+", fdo_lines[idx + n]):
+            symbols.append(fdo_lines[idx + n].split()[1])
+            positions.append(
+                [round(float(x), 5)
+                 for x in re.findall(freg, fdo_lines[idx + n])[-3:]]
+            )
+            n += 1
+        atoms = Atoms(positions=positions, symbols=symbols)
+        atoms.pbc = True
+        return atoms
+
+    def _read_alat(idx):
+        return round(float(re.findall(freg, fdo_lines[idx])[1]), 5)
+
+    def _read_cell(idx):
+        cell = []
+        n = 1
+        while re.findall(r"^\s*a\(\d\)", fdo_lines[idx + n]):
+            cell.append([round(float(x), 4)
+                         for x in re.findall(freg, fdo_lines[idx + n])[-3:]])
+            n += 1
+        return np.array(cell)
+
+    def _read_electron_phonon(idx):
+        results = {}
+
+        broad_re = (
+            r"^\s*Gaussian\s*Broadening:\s+([\d.]+)\s+Ry, ngauss=\s+\d+"
+        )
+        dos_re = (
+            r"^\s*DOS\s*=\s*([\d.]+)\s*states/"
+            r"spin/Ry/Unit\s*Cell\s*at\s*Ef=\s+([\d.]+)\s+eV"
+        )
+        lg_re = (
+            r"^\s*lambda\(\s+(\d+)\)=\s+([\d.]+)\s+gamma=\s+([\d.]+)\s+GHz"
+        )
+        end_re = r"^\s*Number\s*of\s*q\s*in\s*the\s*star\s*=\s+(\d+)$"
+
+        lambdas = []
+        gammas = []
+
+        current = None
+
+        n = 1
+        while idx + n < n_lines:
+            line = fdo_lines[idx + n]
+
+            broad_match = re.match(broad_re, line)
+            dos_match = re.match(dos_re, line)
+            lg_match = re.match(lg_re, line)
+            end_match = re.match(end_re, line)
+
+            if broad_match:
+                if lambdas:
+                    results[current]["lambdas"] = lambdas
+                    results[current]["gammas"] = gammas
+                    lambdas = []
+                    gammas = []
+                current = float(broad_match[1])
+                results[current] = {}
+            elif dos_match:
+                results[current]["dos"] = float(dos_match[1])
+                results[current]["fermi"] = float(dos_match[2])
+            elif lg_match:
+                lambdas.append(float(lg_match[2]))
+                gammas.append(float(lg_match[3]))
+
+            if end_match:
+                results[current]["lambdas"] = lambdas
+                results[current]["gammas"] = gammas
+                break
+
+            n += 1
+
+        return results
+
+    properties = {
+        NKPTS: _read_kpoints,
+        DIEL: _read_epsil,
+        BORN: _read_born,
+        BORN_DFPT: _read_born_dfpt,
+        POLA: _read_pola,
+        REPR: _read_repr,
+        EQPOINTS: _read_eqpoints,
+        DIAG: _read_freqs,
+        MODE_SYM: _read_sym,
+        POSITIONS: _read_positions,
+        ALAT: _read_alat,
+        CELL: _read_cell,
+        ELECTRON_PHONON: _read_electron_phonon,
+    }
+
+    iblocks = np.append(output[QPOINTS], n_lines)
+
+    for qnum, (past, future) in enumerate(zip(iblocks[:-1], iblocks[1:])):
+        qpoint = _read_qpoints(past)
+        results[qnum + 1] = curr_result = {"qpoint": qpoint}
+        for prop in properties:
+            p = (past < output[prop]) & (output[prop] < future)
+            selected = output[prop][p]
+            if len(selected) == 0:
+                continue
+            if unique[prop]:
+                idx = output[prop][p][-1]
+                curr_result[names[prop]] = properties[prop](idx)
+            else:
+                tmp = {k + 1: 0 for k in range(len(selected))}
+                for k, idx in enumerate(selected):
+                    tmp[k + 1] = properties[prop](idx)
+                curr_result[names[prop]] = tmp
+        alat = curr_result.pop("alat", 1.0)
+        atoms = curr_result.pop("positions", None)
+        cell = curr_result.pop("cell", np.eye(3))
+        if atoms:
+            atoms.positions *= alat * units["Bohr"]
+            atoms.cell = cell * alat * units["Bohr"]
+            atoms.wrap()
+            curr_result["atoms"] = atoms
+
+    return results
+
+
+def write_fortran_namelist(
+        fd,
+        input_data=None,
+        binary=None,
+        additional_cards=None,
+        **kwargs) -> None:
+    """
+    Function which writes input for simple espresso binaries.
+    List of supported binaries are in the espresso_keys.py file.
+    Non-exhaustive list (to complete)
+
+    Note: "EOF" is appended at the end of the file.
+    (https://lists.quantum-espresso.org/pipermail/users/2020-November/046269.html)
+
+    Additional fields are written 'as is' in the input file. It is expected
+    to be a string or a list of strings.
+
+    Parameters
+    ----------
+    fd
+        The file descriptor of the input file.
+    input_data: dict
+        A flat or nested dictionary with input parameters for the binary.x
+    binary: str
+        Name of the binary
+    additional_cards: str | list[str]
+        Additional fields to be written at the end of the input file, after
+        the namelist. It is expected to be a string or a list of strings.
+
+    Returns
+    -------
+    None
+    """
+    input_data = Namelist(input_data)
+
+    if binary:
+        input_data.to_nested(binary, **kwargs)
+
+    pwi = input_data.to_string()
+
+    fd.write(pwi)
+
+    if additional_cards:
+        if isinstance(additional_cards, list):
+            additional_cards = "\n".join(additional_cards)
+            additional_cards += "\n"
+
+        fd.write(additional_cards)
+
+    fd.write("EOF")
+
+
+@deprecated('Please use the ase.io.espresso.Namelist class',
+            DeprecationWarning)
+def construct_namelist(parameters=None, keys=None, warn=False, **kwargs):
+    """
+    Construct an ordered Namelist containing all the parameters given (as
+    a dictionary or kwargs). Keys will be inserted into their appropriate
+    section in the namelist and the dictionary may contain flat and nested
+    structures. Any kwargs that match input keys will be incorporated into
+    their correct section. All matches are case-insensitive, and returned
+    Namelist object is a case-insensitive dict.
+
+    If a key is not known to ase, but in a section within `parameters`,
+    it will be assumed that it was put there on purpose and included
+    in the output namelist. Anything not in a section will be ignored (set
+    `warn` to True to see ignored keys).
+
+    Keys with a dimension (e.g. Hubbard_U(1)) will be incorporated as-is
+    so the `i` should be made to match the output.
+
+    The priority of the keys is:
+        kwargs[key] > parameters[key] > parameters[section][key]
+    Only the highest priority item will be included.
+
+    .. deprecated:: 3.23.0
+        Please use :class:`ase.io.espresso.Namelist` instead.
+
+    Parameters
+    ----------
+    parameters: dict
+        Flat or nested set of input parameters.
+    keys: Namelist | dict
+        Namelist to use as a template for the output.
+    warn: bool
+        Enable warnings for unused keys.
+
+    Returns
+    -------
+    input_namelist: Namelist
+        pw.x compatible namelist of input parameters.
+
+    """
+
+    if keys is None:
+        keys = deepcopy(pw_keys)
+    # Convert everything to Namelist early to make case-insensitive
+    if parameters is None:
+        parameters = Namelist()
+    else:
+        # Maximum one level of nested dict
+        # Don't modify in place
+        parameters_namelist = Namelist()
+        for key, value in parameters.items():
+            if isinstance(value, dict):
+                parameters_namelist[key] = Namelist(value)
+            else:
+                parameters_namelist[key] = value
+        parameters = parameters_namelist
+
+    # Just a dict
+    kwargs = Namelist(kwargs)
+
+    # Final parameter set
+    input_namelist = Namelist()
+
+    # Collect
+    for section in keys:
+        sec_list = Namelist()
+        for key in keys[section]:
+            # Check all three separately and pop them all so that
+            # we can check for missing values later
+            value = None
+
+            if key in parameters.get(section, {}):
+                value = parameters[section].pop(key)
+            if key in parameters:
+                value = parameters.pop(key)
+            if key in kwargs:
+                value = kwargs.pop(key)
+
+            if value is not None:
+                sec_list[key] = value
+
+            # Check if there is a key(i) version (no extra parsing)
+            for arg_key in list(parameters.get(section, {})):
+                if arg_key.split('(')[0].strip().lower() == key.lower():
+                    sec_list[arg_key] = parameters[section].pop(arg_key)
+            cp_parameters = parameters.copy()
+            for arg_key in cp_parameters:
+                if arg_key.split('(')[0].strip().lower() == key.lower():
+                    sec_list[arg_key] = parameters.pop(arg_key)
+            cp_kwargs = kwargs.copy()
+            for arg_key in cp_kwargs:
+                if arg_key.split('(')[0].strip().lower() == key.lower():
+                    sec_list[arg_key] = kwargs.pop(arg_key)
+
+        # Add to output
+        input_namelist[section] = sec_list
+
+    unused_keys = list(kwargs)
+    # pass anything else already in a section
+    for key, value in parameters.items():
+        if key in keys and isinstance(value, dict):
+            input_namelist[key].update(value)
+        elif isinstance(value, dict):
+            unused_keys.extend(list(value))
+        else:
+            unused_keys.append(key)
+
+    if warn and unused_keys:
+        warnings.warn('Unused keys: {}'.format(', '.join(unused_keys)))
+
+    return input_namelist
+
+
+@deprecated('Please use the .to_string() method of Namelist instead.',
+            DeprecationWarning)
+def namelist_to_string(input_parameters):
+    """Format a Namelist object as a string for writing to a file.
+    Assume sections are ordered (taken care of in namelist construction)
+    and that repr converts to a QE readable representation (except bools)
+
+    .. deprecated:: 3.23.0
+        Please use the :meth:`ase.io.espresso.Namelist.to_string` method
+        instead.
+
+    Parameters
+    ----------
+    input_parameters : Namelist | dict
+        Expecting a nested dictionary of sections and key-value data.
+
+    Returns
+    -------
+    pwi : List[str]
+        Input line for the namelist
+    """
+    pwi = []
+    for section in input_parameters:
+        pwi.append(f'&{section.upper()}\n')
+        for key, value in input_parameters[section].items():
+            if value is True:
+                pwi.append(f'   {key:16} = .true.\n')
+            elif value is False:
+                pwi.append(f'   {key:16} = .false.\n')
+            elif isinstance(value, Path):
+                pwi.append(f'   {key:16} = "{value}"\n')
+            else:
+                # repr format to get quotes around strings
+                pwi.append(f'   {key:16} = {value!r}\n')
+        pwi.append('/\n')  # terminate section
+    pwi.append('\n')
+    return pwi

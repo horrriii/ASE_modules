@@ -2,15 +2,11 @@
 Tests of the plugin functionality for defining IO formats
 outside of the ase package
 """
-import pytest
 import copy
-import sys
 import io
+from importlib.metadata import EntryPoint
 
-if sys.version_info >= (3, 8):
-    from importlib.metadata import EntryPoint
-else:
-    from importlib_metadata import EntryPoint
+import pytest
 
 from ase.build import bulk
 from ase.io import formats, read, write
@@ -66,7 +62,7 @@ def test_external_ioformat_valid(tmp_path):
 
     atom = bulk('Ti')
     write(tmp_path / 'dummy_output', atom, format='dummy')
-    with open(tmp_path / 'dummy_output', 'r') as file:
+    with open(tmp_path / 'dummy_output') as file:
         assert file.read() == 'dummy output'
 
 

@@ -1,4 +1,7 @@
+import numpy as np
+
+from ase.dft.kpoints import bandpath
+
+
 def test_kpts():
-    from ase.dft.kpoints import bandpath
-    import numpy as np
     print(bandpath('GX,GX', np.eye(3), 6))

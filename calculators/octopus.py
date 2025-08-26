@@ -7,41 +7,42 @@ http://tddft.org/programs/octopus/
 """
 
 import numpy as np
-from ase.io.octopus.input import process_special_kwargs, generate_input
-from ase.io.octopus.output import read_eigenvalues_file, read_static_info
-from ase.calculators.genericfileio import (CalculatorTemplate,
+
+from ase.calculators.genericfileio import (BaseProfile, CalculatorTemplate,
                                            GenericFileIOCalculator)
+from ase.io.octopus.input import generate_input, process_special_kwargs
+from ase.io.octopus.output import read_eigenvalues_file, read_static_info
 
 
 class OctopusIOError(IOError):
     pass
 
 
-class OctopusProfile:
-    def __init__(self, argv):
-        self.argv = argv
+class OctopusProfile(BaseProfile):
+    def get_calculator_command(self, inputfile):
+        return []
 
     def version(self):
-        from subprocess import check_output
         import re
-        txt = check_output(self.argv + ['--version']).decode('ascii')
+        from subprocess import check_output
+        txt = check_output([*self._split_command, '--version'],
+                           encoding='ascii')
         match = re.match(r'octopus\s*(.+)', txt)
         # With MPI it prints the line for each rank, but we just match
         # the first line.
         return match.group(1)
 
-    def run(self, directory, outputfile):
-        from subprocess import check_call
-        with open(directory / outputfile, 'w') as fd:
-            check_call(self.argv, stdout=fd, cwd=directory)
-
 
 class OctopusTemplate(CalculatorTemplate):
+    _label = 'octopus'
+
     def __init__(self):
         super().__init__(
-            name='octopus',
+            'octopus',
             implemented_properties=['energy', 'forces', 'dipole', 'stress'],
         )
+        self.outputname = f'{self._label}.out'
+        self.errorname = f'{self._label}.err'
 
     def read_results(self, directory):
         """Read octopus output files and extract data."""
@@ -65,12 +66,16 @@ class OctopusTemplate(CalculatorTemplate):
         return results
 
     def execute(self, directory, profile):
-        profile.run(directory, 'octopus.out')
+        profile.run(directory, None, self.outputname,
+                    errorfile=self.errorname)
 
-    def write_input(self, directory, atoms, parameters, properties):
+    def write_input(self, profile, directory, atoms, parameters, properties):
         txt = generate_input(atoms, process_special_kwargs(atoms, parameters))
         inp = directory / 'inp'
         inp.write_text(txt)
+
+    def load_profile(self, cfg, **kwargs):
+        return OctopusProfile.from_config(cfg, self.name, **kwargs)
 
 
 class Octopus(GenericFileIOCalculator):
@@ -78,19 +83,14 @@ class Octopus(GenericFileIOCalculator):
 
     The label is always assumed to be a directory."""
 
-    def __init__(self,
-                 profile=None,
-                 directory='.',
-                 **kwargs):
+    def __init__(self, profile=None, directory='.', **kwargs):
         """Create Octopus calculator.
 
         Label is always taken as a subdirectory.
         Restart is taken to be a label."""
 
-        if profile is None:
-            profile = OctopusProfile(['octopus'])
-
-        super().__init__(profile=profile, template=OctopusTemplate(),
+        super().__init__(profile=profile,
+                         template=OctopusTemplate(),
                          directory=directory,
                          parameters=kwargs)
 

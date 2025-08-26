@@ -1,10 +1,10 @@
-import pytest
 import numpy as np
+import pytest
 
 from ase.build import molecule
 
 
-@pytest.fixture
+@pytest.fixture()
 def atoms():
     return molecule('H2')
 

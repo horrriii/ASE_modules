@@ -1,6 +1,7 @@
 """ An object which can be associated with a local relaxation in order
 to make the relaxations run more smoothly."""
 from math import sqrt
+
 import numpy as np
 
 
@@ -33,8 +34,8 @@ class VariansBreak:
 
         m = sum(self.forces) / float(len(self.forces))
 
-        stdev = sqrt(sum([(c - m)**2 for c in self.forces]) /
-                     float(len(self.forces)))
+        stdev = sqrt(
+            (sum((c - m)**2 for c in self.forces) / float(len(self.forces))))
 
         if len(self.forces) >= self.N and stdev < self.min_stdev:
             self.dyn.converged = lambda x: True

@@ -1,17 +1,18 @@
 import os
 from pathlib import Path
 
-import pytest
 import numpy as np
+import pytest
 
-from ase import Atoms
-from ase.calculators.singlepoint import SinglePointCalculator
-from ase.build import molecule, bulk
 import ase.gui.ui as ui
-from ase.gui.i18n import _
+from ase import Atoms
+from ase.build import bulk, molecule
+from ase.calculators.singlepoint import SinglePointCalculator
 from ase.gui.gui import GUI
-from ase.gui.save import save_dialog
+from ase.gui.i18n import _
 from ase.gui.quickinfo import info
+from ase.gui.save import save_dialog
+from ase.test.fio.test_cif import content
 
 
 class GUIError(Exception):
@@ -23,14 +24,14 @@ def mock_gui_error(title, text=None):
     raise GUIError(title, text)
 
 
-@pytest.fixture
+@pytest.fixture()
 def display():
     pytest.importorskip('tkinter')
     if not os.environ.get('DISPLAY'):
         raise pytest.skip('no display')
 
 
-@pytest.fixture
+@pytest.fixture()
 def gui(guifactory):
     return guifactory(None)
 
@@ -50,7 +51,7 @@ def no_blocking_errors_monkeypatch(monkeypatch):
     # ui.error = orig_ui_error
 
 
-@pytest.fixture
+@pytest.fixture()
 def guifactory(display):
     guis = []
 
@@ -64,14 +65,14 @@ def guifactory(display):
         gui.exit()
 
 
-@pytest.fixture
+@pytest.fixture()
 def atoms(gui):
     atoms = bulk('Ti') * (2, 2, 2)
     gui.new_atoms(atoms)
     return atoms
 
 
-@pytest.fixture
+@pytest.fixture()
 def animation(guifactory):
     images = [bulk(sym) for sym in ['Cu', 'Ag', 'Au']]
     gui = guifactory(images)
@@ -161,7 +162,7 @@ def test_rotate(gui):
 
 def test_open_and_save(gui, testdir):
     mol = molecule('H2O')
-    for i in range(3):
+    for j in range(3):
         mol.write('h2o.json')
     gui.open(filename='h2o.json')
     save_dialog(gui, 'h2o.cif@-1')
@@ -181,7 +182,6 @@ def test_export_graphics(gui, testdir, with_bulk_ti, monkeypatch, filename):
 
 
 def test_fracocc(gui, testdir):
-    from ase.test.fio.test_cif import content
     with open('./fracocc.cif', 'w') as fd:
         fd.write(content)
     gui.open(filename='fracocc.cif')
@@ -201,21 +201,21 @@ def test_povray(gui, testdir):
     assert ini.is_file()
     assert pov.is_file()
 
-    with open(ini, 'r') as _:
+    with open(ini) as _:
         _ = _.read()
         assert 'H2O' in _
-    with open(pov, 'r') as _:
+    with open(pov) as _:
         _ = _.read()
         assert 'atom' in _
 
 
-@pytest.fixture
+@pytest.fixture()
 def with_bulk_ti(gui):
     atoms = bulk('Ti') * (2, 2, 2)
     gui.new_atoms(atoms)
 
 
-@pytest.fixture
+@pytest.fixture()
 def modify(gui, with_bulk_ti):
     gui.images.selected[:4] = True
     return gui.modify_atoms()

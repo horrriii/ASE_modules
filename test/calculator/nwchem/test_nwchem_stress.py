@@ -1,9 +1,10 @@
 import pytest
-from ase.build import bulk
 from numpy.testing import assert_allclose
 
+from ase.build import bulk
 
-@pytest.mark.calculator_lite
+
+@pytest.mark.calculator_lite()
 @pytest.mark.calculator('nwchem')
 def test_main(factory):
     atoms = bulk('C')

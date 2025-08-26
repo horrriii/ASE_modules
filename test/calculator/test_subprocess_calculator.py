@@ -2,9 +2,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from ase.calculators.subprocesscalculator import NamedPackedCalculator
+
+from ase.build import bulk, molecule
 from ase.calculators.emt import EMT
-from ase.build import molecule, bulk
+from ase.calculators.subprocesscalculator import (MPICommand,
+                                                  NamedPackedCalculator,
+                                                  ParallelDispatch,
+                                                  gpaw_process)
 from ase.optimize import BFGS
 
 
@@ -12,7 +16,7 @@ def get_fmax(forces):
     return max((forces**2).sum(axis=1)**0.5)
 
 
-@pytest.fixture
+@pytest.fixture()
 def atoms():
     atoms = bulk('Au') * (2, 2, 2)
     atoms.rattle(stdev=0.05, seed=2)
@@ -43,6 +47,7 @@ def test_subprocess_calculator_emt(atoms):
     assert_results_equal_to_ordinary_emt(atoms)
 
 
+@pytest.mark.optimize()
 def test_subprocess_calculator_optimize(atoms):
     pack = NamedPackedCalculator('emt')
     opt = BFGS(atoms)
@@ -59,10 +64,9 @@ def test_subprocess_calculator_optimize(atoms):
     assert_results_equal_to_ordinary_emt(atoms)
 
 
-@pytest.mark.calculator_lite
+@pytest.mark.calculator_lite()
 @pytest.mark.calculator('gpaw')
 def test_subprocess_calculator_mpi(factory):
-    from ase.calculators.subprocesscalculator import gpaw_process
     atoms = molecule('H2', vacuum=2.0)
     atoms.pbc = 1
     nbands = 3
@@ -83,3 +87,16 @@ def test_subprocess_calculator_mpi(factory):
         assert isinstance(nt_g, np.ndarray)
         assert nt_g.dtype == float
         assert all(dim > 10 for dim in nt_g.shape)
+
+
+def parallel_dummy_function(a, b):
+    # (Not actually doing any parallel work.)
+    print('a and b', a, b)
+    return a + b
+
+
+def test_function_evaluation():
+    with ParallelDispatch(MPICommand.serial()) as parallel:
+        result = parallel.call(parallel_dummy_function, 2, b=3)
+
+    assert result == 5

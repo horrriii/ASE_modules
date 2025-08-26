@@ -1,9 +1,9 @@
-import pytest
 import numpy as np
+import pytest
+
 from ase.build import bulk
-from ase.spacegroup import crystal, Spacegroup
+from ase.spacegroup import Spacegroup, crystal, utils
 from ase.spacegroup.spacegroup import SpacegroupValueError
-from ase.spacegroup import utils
 
 
 @pytest.fixture(params=[
@@ -45,8 +45,8 @@ from ase.spacegroup import utils
     },
 ])
 def basis_tests(request):
-    """Fixture which returns a dictionary with some test inputs and expected values
-    for testing the `get_basis` function."""
+    """Fixture which returns a dictionary with some test inputs and
+    expected values for testing the `get_basis` function."""
     return request.param()
 
 

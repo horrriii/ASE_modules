@@ -1,11 +1,12 @@
-from math import radians, sin, cos
-import pytest
-from ase import Atoms
-from ase.neb import NEB
-from ase.constraints import FixAtoms
-from ase.calculators.emt import EMT
-from ase.optimize import QuasiNewton, BFGS
+from math import cos, radians, sin
 
+import pytest
+
+from ase import Atoms
+from ase.calculators.emt import EMT
+from ase.constraints import FixAtoms
+from ase.mep import NEB
+from ase.optimize import BFGS, QuasiNewton
 
 # http://jcp.aip.org/resource/1/jcpsa6/v97/i10/p7507_s1
 doo = 2.74
@@ -14,7 +15,7 @@ doh = 0.977
 angle = radians(104.5)
 
 
-@pytest.fixture
+@pytest.fixture()
 def initial():
     return Atoms('HOHOH',
                  positions=[(-sin(angle) * doht, 0., cos(angle) * doht),
@@ -24,7 +25,7 @@ def initial():
                             (sin(angle) * doht, 0., doo - cos(angle) * doht)])
 
 
-@pytest.fixture
+@pytest.fixture()
 def final(initial):
     atoms = initial.copy()
     atoms.positions[2, 2] = doo - doh
@@ -34,7 +35,7 @@ def final(initial):
 def test_emt_h3o2m(initial, final, testdir):
     # Make band:
     images = [initial.copy()]
-    for i in range(3):
+    for _ in range(3):
         images.append(initial.copy())
     images.append(final.copy())
     neb = NEB(images, climb=True)

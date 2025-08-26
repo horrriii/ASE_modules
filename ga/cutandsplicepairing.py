@@ -1,10 +1,11 @@
 """Implementation of the cut-and-splice paring operator."""
 import numpy as np
+
 from ase import Atoms
-from ase.geometry import find_mic
+from ase.ga.offspring_creator import OffspringCreator
 from ase.ga.utilities import (atoms_too_close, atoms_too_close_two_sets,
                               gather_atoms_by_tag)
-from ase.ga.offspring_creator import OffspringCreator
+from ase.geometry import find_mic
 
 
 class Positions:
@@ -185,8 +186,8 @@ class CutAndSplicePairing(OffspringCreator):
         f, m = parents
 
         indi = self.cross(f, m)
-        desc = 'pairing: {0} {1}'.format(f.info['confid'],
-                                         m.info['confid'])
+        desc = 'pairing: {} {}'.format(f.info['confid'],
+                                       m.info['confid'])
         # It is ok for an operator to return None
         # It means that it could not make a legal offspring
         # within a reasonable amount of time
@@ -410,7 +411,7 @@ class CutAndSplicePairing(OffspringCreator):
 
         # For each atom type make the pairing
         unique_sym.sort()
-        use_total = dict()
+        use_total = {}
         for s in unique_sym:
             used = []
             not_used = []
@@ -442,15 +443,15 @@ class CutAndSplicePairing(OffspringCreator):
 
             use_total[s] = used
 
-        n_tot = sum([len(ll) for ll in use_total.values()])
+        n_tot = sum(len(ll) for ll in use_total.values())
         assert n_tot == len(sym)
 
         # check if the generated structure contains
         # atoms from both parents:
         count1, count2, N = 0, 0, len(a1)
         for x in use_total.values():
-            count1 += sum([y.origin == 0 for y in x])
-            count2 += sum([y.origin == 1 for y in x])
+            count1 += sum(y.origin == 0 for y in x)
+            count2 += sum(y.origin == 1 for y in x)
 
         nmin = 1 if self.minfrac is None else int(round(self.minfrac * N))
         if count1 < nmin or count2 < nmin:

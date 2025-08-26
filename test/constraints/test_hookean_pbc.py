@@ -1,7 +1,9 @@
+from ase import Atoms
+from ase.calculators.emt import EMT
+from ase.constraints import Hookean
+
+
 def test_hookean_pbc():
-    from ase import Atoms
-    from ase.calculators.emt import EMT
-    from ase.constraints import Hookean
 
     L = 8.  # length of the cubic box
     d = 2.3  # Au-Au distance
@@ -22,4 +24,4 @@ def test_hookean_pbc():
     e3 = a.get_potential_energy()
 
     assert abs(e1 - e2) < 1e-8
-    assert not abs(e1 - e3) < 1e-8
+    assert abs(e1 - e3) >= 1e-8

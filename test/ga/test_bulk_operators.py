@@ -1,27 +1,28 @@
 import numpy as np
 import pytest
+
 from ase import Atoms
 from ase.build import bulk
-from ase.ga.utilities import (closest_distances_generator, atoms_too_close,
-                              CellBounds)
-from ase.ga.startgenerator import StartGenerator
 from ase.ga.cutandsplicepairing import CutAndSplicePairing
-from ase.ga.soft_mutation import SoftMutation
-from ase.ga.ofp_comparator import OFPComparator
 from ase.ga.offspring_creator import CombinationMutation
-from ase.ga.standardmutations import (RattleMutation, PermutationMutation,
-                                      StrainMutation, RotationalMutation,
-                                      RattleRotationalMutation)
+from ase.ga.ofp_comparator import OFPComparator
+from ase.ga.soft_mutation import SoftMutation
+from ase.ga.standardmutations import (PermutationMutation, RattleMutation,
+                                      RattleRotationalMutation,
+                                      RotationalMutation, StrainMutation)
+from ase.ga.startgenerator import StartGenerator
+from ase.ga.utilities import (CellBounds, atoms_too_close,
+                              closest_distances_generator)
 
 
-@pytest.mark.slow
+@pytest.mark.slow()
 def test_bulk_operators(seed, tmp_path):
     # set up the random number generator
     rng = np.random.RandomState(seed)
 
     h2 = Atoms('H2', positions=[[0, 0, 0], [0, 0, 0.75]])
     blocks = [('H', 4), ('H2O', 3), (h2, 2)]  # the building blocks
-    volume = 40. * sum([x[1] for x in blocks])  # cell volume in angstrom^3
+    volume = 40. * sum(x[1] for x in blocks)
     splits = {(2,): 1, (1,): 1}  # cell splitting scheme
 
     stoichiometry = []

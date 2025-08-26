@@ -5,11 +5,15 @@ from ase.atoms import Atoms
 from ase.build import bulk
 from ase.calculators.calculator import all_changes
 from ase.calculators.lj import LennardJones
-from ase.spacegroup.symmetrize import FixSymmetry, check_symmetry, is_subgroup
+from ase.constraints import FixSymmetry
+from ase.filters import FrechetCellFilter, UnitCellFilter
 from ase.optimize.precon.lbfgs import PreconLBFGS
-from ase.constraints import UnitCellFilter, ExpCellFilter
+from ase.spacegroup.symmetrize import check_symmetry, is_subgroup
 
 spglib = pytest.importorskip('spglib')
+
+
+pytestmark = pytest.mark.optimize
 
 
 class NoisyLennardJones(LennardJones):
@@ -70,7 +74,22 @@ def symmetrized_optimisation(at_init, filter):
     return di, df
 
 
-@pytest.fixture(params=[UnitCellFilter, ExpCellFilter])
+def test_as_dict():
+    atoms = bulk("Cu")
+    atoms.set_constraint(FixSymmetry(atoms))
+    assert atoms.constraints[0].todict() == {
+        'name': 'FixSymmetry',
+        'kwargs': {
+            'atoms': bulk('Cu'),
+            'symprec': 0.01,
+            'adjust_positions': True,
+            'adjust_cell': True,
+            'verbose': False,
+        },
+    }
+
+
+@pytest.fixture(params=[UnitCellFilter, FrechetCellFilter])
 def filter(request):
     return request.param
 

@@ -4,16 +4,15 @@ Implemented:
 * Input file (xyz.in)
 
 """
-import pytest
-
 import numpy as np
+import pytest
 
 from ase import io
 from ase.build import bulk
 from ase.io.gpumd import load_xyz_input_gpumd
 
 
-@pytest.fixture
+@pytest.fixture()
 def gpumd_input_text():
     """This file is parsed correctly by GPUMD, since it is included
     among the examples distributed with the package, i.e.
@@ -38,7 +37,7 @@ def gpumd_input_text():
     1 8.91989 -1.32745 44.8546 12.011 0.00351112 -0.00690595 0.040041 15 1 """
 
 
-@pytest.fixture
+@pytest.fixture()
 def rocksalt():
     return bulk('NiO', 'rocksalt', 4.813, cubic=True)
 
@@ -100,7 +99,7 @@ def test_load_gpumd_input(gpumd_input_text):
         fd.write(gpumd_input_text)
 
     species_ref = ['Si', 'C']
-    with open('xyz.in', 'r') as fd:
+    with open('xyz.in') as fd:
         atoms, input_parameters, species =\
             load_xyz_input_gpumd(fd, species=species_ref)
     input_parameters_ref = {'N': 16, 'M': 4, 'cutoff': 1.1,
@@ -125,7 +124,7 @@ def test_gpumd_write_cubic(rocksalt):
 def test_gpumd_write_triclinic(rocksalt):
     """Test write and load with triclinic cell."""
     rocksalt.write('xyz.in', use_triclinic=True)
-    with open('xyz.in', 'r') as fd:
+    with open('xyz.in') as fd:
         readback, input_parameters, _ = load_xyz_input_gpumd(fd)
     assert input_parameters['triclinic'] == 1
     assert np.allclose(rocksalt.positions, readback.positions)
@@ -143,7 +142,7 @@ def test_gpumd_write_with_groupings(rocksalt):
     groups = [[[j for j, group in enumerate(grouping) if i in group][0]
                for grouping in groupings] for i in range(len(rocksalt))]
     rocksalt.write('xyz.in', groupings=groupings)
-    with open('xyz.in', 'r') as fd:
+    with open('xyz.in') as fd:
         readback, input_parameters, _ = load_xyz_input_gpumd(fd)
     assert input_parameters['num_of_groups'] == 2
     assert len(readback.info) == len(rocksalt)
@@ -160,7 +159,7 @@ def test_gpumd_write_with_velocities(rocksalt):
                            [-0.1, 1.4, -1.9], [-1.0, -0.5, -1.2]])
     rocksalt.set_velocities(velocities)
     rocksalt.write('xyz.in')
-    with open('xyz.in', 'r') as fd:
+    with open('xyz.in') as fd:
         readback, input_parameters, _ = load_xyz_input_gpumd(fd)
     assert input_parameters['has_velocity'] == 1
     assert np.allclose(readback.get_velocities(), rocksalt.get_velocities())

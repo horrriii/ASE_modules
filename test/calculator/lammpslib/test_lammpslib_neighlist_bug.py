@@ -1,10 +1,10 @@
+import numpy as np
 import pytest
 
-import numpy as np
 from ase.atoms import Atoms
 
 
-@pytest.mark.calculator_lite
+@pytest.mark.calculator_lite()
 @pytest.mark.calculator("lammpslib")
 def test_lammps_neighlist_buf(factory, testdir):
     # this is a perfectly symmetric FCC configurations, all forces

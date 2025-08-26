@@ -1,8 +1,31 @@
-import pytest
+from collections import OrderedDict
+from io import StringIO
+from pathlib import Path
 
 import numpy as np
+import pytest
+
 from ase.io import read
-from io import StringIO
+from ase.units import GPa
+
+parent = Path(__file__).parents[2]
+
+
+def test_parse_dfpt_dielectric(testdir):
+    outfile = parent / "testdata/vasp/vasprun_dfpt.xml"
+    atoms = read(outfile, format="vasp-xml")
+
+    diel = atoms.calc.results['dielectric_tensor']
+
+    diel_0 = np.diag(3 * [2.6958435, ])
+    assert np.allclose(diel, diel_0)
+
+    bec = atoms.calc.results['born_effective_charges']
+
+    _bec = np.diag(3 * [1.14672091, ])
+
+    bec_0 = np.array([_bec, -_bec])
+    assert np.allclose(bec, bec_0)
 
 
 @pytest.fixture()
@@ -178,8 +201,6 @@ def test_atoms(vasprun):
 
 def check_calculation(vasprun_record, expected_values, index=-1):
 
-    from ase.units import GPa
-
     atoms = read(StringIO(vasprun_record), index=index,
                  format='vasp-xml')
 
@@ -250,8 +271,6 @@ def test_corrupted_calculation(vasprun, calculation):
 
 
 def test_vasp_parameters(vasprun, calculation):
-
-    from collections import OrderedDict
 
     vasp_parameters = """\
  <kpoints>

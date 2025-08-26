@@ -6,13 +6,19 @@ Implemented:
 
 """
 
+import io
+
 import numpy as np
+import pytest
 
-from ase import io
-from ase import build
-from ase.io.espresso import parse_position_line
-
-from pytest import approx
+import ase.build
+import ase.io
+from ase import Atoms
+from ase.calculators.calculator import compare_atoms
+from ase.constraints import FixAtoms, FixCartesian, FixScaled
+from ase.io.espresso import (get_atomic_species, parse_position_line,
+                             read_espresso_in, read_fortran_namelist,
+                             write_espresso_in, write_fortran_namelist)
 
 # This file is parsed correctly by pw.x, even though things are
 # scattered all over the place with some namelist edge cases
@@ -37,7 +43,7 @@ pw_input_text = """
 nat              = 8,   ntyp             = 2,  occupations      = 'smearing',
 smearing         = 'marzari-vanderbilt',
 degauss          = 0.01,   nspin            = 2,  !  nosym     = .true. ,
-    starting_magnetization(2) = 0.32 /
+    starting_magnetization(2) = 5.12 /
 &ELECTRONS
    electron_maxstep = 300
    mixing_beta      = 0.1
@@ -277,27 +283,27 @@ def test_pw_input():
     with open('pw_input.pwi', 'w') as pw_input_f:
         pw_input_f.write(pw_input_text)
 
-    pw_input_atoms = io.read('pw_input.pwi', format='espresso-in')
+    pw_input_atoms = ase.io.read('pw_input.pwi', format='espresso-in')
     assert len(pw_input_atoms) == 8
     assert (pw_input_atoms.get_initial_magnetic_moments()
-            == approx([5.12, 5.12, 5.12, 5.12, 5.12, 5.12, 0., 0.]))
+            == pytest.approx([5.12, 5.12, 5.12, 5.12, 5.12, 5.12, 0., 0.]))
 
 
 def test_get_atomic_species():
     """Parser for atomic species section"""
-    from ase.io.espresso import get_atomic_species, read_fortran_namelist
 
     with open('pw_input.pwi', 'w') as pw_input_f:
         pw_input_f.write(pw_input_text)
-    with open('pw_input.pwi', 'r') as pw_input_f:
+    with open('pw_input.pwi') as pw_input_f:
         data, card_lines = read_fortran_namelist(pw_input_f)
         species_card = get_atomic_species(card_lines,
                                           n_species=data['system']['ntyp'])
 
     assert len(species_card) == 2
-    assert species_card[0] == ("H", approx(1.008), "H.pbe-rrkjus_psl.0.1.UPF")
-    assert species_card[1] == ("Fe", approx(55.845),
-                               "Fe.pbe-spn-rrkjus_psl.0.2.1.UPF")
+    assert species_card[0] == (
+        "H", pytest.approx(1.008), "H.pbe-rrkjus_psl.0.1.UPF")
+    assert species_card[1] == (
+        "Fe", pytest.approx(55.845), "Fe.pbe-spn-rrkjus_psl.0.2.1.UPF")
 
 
 def test_pw_output():
@@ -305,14 +311,15 @@ def test_pw_output():
     with open('pw_output.pwo', 'w') as pw_output_f:
         pw_output_f.write(pw_output_text)
 
-    pw_output_traj = io.read('pw_output.pwo', index=':')
+    pw_output_traj = ase.io.read('pw_output.pwo', index=':')
     assert len(pw_output_traj) == 2
     assert pw_output_traj[1].get_volume() > pw_output_traj[0].get_volume()
 
 
 def test_pw_parse_line():
     """Parse a single position line from a pw.x output file."""
-    txt = """       994           Pt  tau( 994) = (   1.4749849   0.7329881   0.0719387  )
+    txt = """       994           Pt  tau( 994) = \
+(   1.4749849   0.7329881   0.0719387  )
        995           Sb  tau( 995) = (   1.4212023   0.7037863   0.1242640  )
        996           Sb  tau( 996) = (   1.5430640   0.7699524   0.1700400  )
        997           Sb  tau( 997) = (   1.4892815   0.7407506   0.2223653  )
@@ -347,38 +354,307 @@ def test_pw_results_required():
         pw_output_f.write(pw_output_text)
 
     # ignore 'final coordinates' with no results
-    pw_output_traj = io.read('pw_output.pwo', index=':')
+    pw_output_traj = ase.io.read('pw_output.pwo', index=':')
     assert 'energy' in pw_output_traj[-1].calc.results
     assert len(pw_output_traj) == 2
     # include un-calculated final config
-    pw_output_traj = io.read('pw_output.pwo', index=':',
-                             results_required=False)
+    pw_output_traj = ase.io.read('pw_output.pwo', index=':',
+                                 results_required=False)
     assert len(pw_output_traj) == 3
     assert 'energy' not in pw_output_traj[-1].calc.results
     # get default index=-1 with results
-    pw_output_config = io.read('pw_output.pwo')
+    pw_output_config = ase.io.read('pw_output.pwo')
     assert 'energy' in pw_output_config.calc.results
     # get default index=-1 with no results "final coordinates'
-    pw_output_config = io.read('pw_output.pwo', results_required=False)
+    pw_output_config = ase.io.read('pw_output.pwo', results_required=False)
     assert 'energy' not in pw_output_config.calc.results
 
 
 def test_pw_input_write():
     """Write a structure and read it back."""
-    bulk = build.bulk('NiO', 'rocksalt', 4.813, cubic=True)
+    bulk = ase.build.bulk('NiO', 'rocksalt', 4.813, cubic=True)
     bulk.set_initial_magnetic_moments([2.2 if atom.symbol == 'Ni' else 0.0
                                        for atom in bulk])
 
-    bulk.write('espresso_test.pwi')
-    readback = io.read('espresso_test.pwi')
+    fh = 'espresso_test.pwi'
+    pseudos = {'Ni': 'potato', 'O': 'orange'}
+
+    write_espresso_in(fh, bulk, pseudopotentials=pseudos)
+    readback = read_espresso_in('espresso_test.pwi')
     assert np.allclose(bulk.positions, readback.positions)
-    #
-    from ase.io.espresso import write_espresso_in
+
     sections = {'system': {
         'lda_plus_u': True,
         'Hubbard_U(1)': 4.0,
         'Hubbard_U(2)': 0.0}}
-    with open('espresso_test.pwi', 'w') as fh:
-        write_espresso_in(fh, bulk, sections)
-    readback = io.read('espresso_test.pwi')
+    write_espresso_in(fh, bulk, sections, pseudopotentials=pseudos,
+                      additional_cards=["test1", "test2", "test3"])
+
+    readback = read_espresso_in('espresso_test.pwi')
+
+    with open('espresso_test.pwi') as f:
+        _, cards = read_fortran_namelist(f)
+
+        assert "K_POINTS gamma" in cards
+        assert cards[-3] == "test1"
+        assert cards[-1] == "test3"
+
     assert np.allclose(bulk.positions, readback.positions)
+
+
+def test_pw_input_write_nested_flat():
+    """Write a structure and read it back."""
+    bulk = ase.build.bulk('Fe')
+
+    fh = 'espresso_test.pwi'
+    pseudos = {'Fe': 'carrot'}
+
+    input_data = {"control": {"calculation": "scf"},
+                  "unused_keyword1": "unused_value1",
+                  "used_sections": {"used_keyword1": "used_value1"}
+                  }
+
+    with pytest.raises(DeprecationWarning):
+        write_espresso_in(fh, bulk, input_data=input_data,
+                          pseudopotentials=pseudos,
+                          mixing_mode="local-TF")
+
+    write_espresso_in(fh, bulk, input_data=input_data,
+                      pseudopotentials=pseudos,
+                      unusedkwarg="unused")
+
+    with open(fh) as f:
+        new_atoms = read_espresso_in(f)
+        f.seek(0)
+        readback = read_fortran_namelist(f)
+
+    read_string = readback[0].to_string()
+
+    assert "&USED_SECTIONS\n" in read_string
+    assert "   used_keyword1    = 'used_value1'\n" in read_string
+    assert np.allclose(bulk.positions, new_atoms.positions)
+
+
+def test_write_fortran_namelist_any():
+    fd = io.StringIO()
+    input_data = {
+        "environ": {"environ_type": "vacuum"},
+        "electrostatic": {"tol": 1e-10, "mix": 0.5},
+        "boundary": {"solvent_mode": "full"}
+    }
+
+    additional_cards = [
+        "EXTERNAL_CHARGES (bohr)",
+        "-0.5 0. 0. 25.697 1.0 2 3",
+        "-0.5 0. 0. 20.697 1.0 2 3"
+    ]
+
+    write_fortran_namelist(fd, input_data, additional_cards=additional_cards)
+    result = fd.getvalue()
+
+    expected = (
+        "&ENVIRON\n"
+        "   environ_type     = 'vacuum'\n"
+        "/\n"
+        "&ELECTROSTATIC\n"
+        "   tol              = 1e-10\n"
+        "   mix              = 0.5\n"
+        "/\n"
+        "&BOUNDARY\n"
+        "   solvent_mode     = 'full'\n"
+        "/\n"
+        "EXTERNAL_CHARGES (bohr)\n"
+        "-0.5 0. 0. 25.697 1.0 2 3\n"
+        "-0.5 0. 0. 20.697 1.0 2 3\n"
+        "EOF"
+    )
+
+    assert result == expected
+    assert "ENVIRON" in result
+    assert "ELECTROSTATIC" in result
+    assert "BOUNDARY" in result
+    assert result.endswith("EOF")
+    fd.seek(0)
+    reread = read_fortran_namelist(fd)
+    assert reread[1][:-1] == additional_cards
+    assert reread[0] == input_data
+
+
+def test_write_fortran_namelist_pw():
+    fd = io.StringIO()
+    input_data = {
+        "calculation": "scf",
+        "ecutwfc": 30.0,
+        "ibrav": 0,
+        "nat": 10,
+        "nbnd": 8,
+        "conv_thr": 1e-6,
+        "random": True}
+    binary = "pw"
+    write_fortran_namelist(fd, input_data, binary)
+    result = fd.getvalue()
+    assert "scf" in result
+    assert "ibrav" in result
+    assert "conv_thr" in result
+    assert result.endswith("EOF")
+    fd.seek(0)
+    reread = read_fortran_namelist(fd)
+    assert reread != input_data
+
+
+def test_write_fortran_namelist_fields():
+    fd = io.StringIO()
+    input_data = {
+        "INPUT": {
+            "amass": 28.0855,
+            "niter_ph": 50,
+            "tr2_ph": 1e-6,
+            "flfrc": "silicon.fc"},
+    }
+    binary = "q2r"
+    write_fortran_namelist(
+        fd,
+        input_data,
+        binary,
+        additional_cards="test1\ntest2\ntest3\n")
+    result = fd.getvalue()
+    expected = ("&INPUT\n"
+                "   flfrc            = 'silicon.fc'\n"
+                "   amass            = 28.0855\n"
+                "   niter_ph         = 50\n"
+                "   tr2_ph           = 1e-06\n"
+                "/\n"
+                "test1\n"
+                "test2\n"
+                "test3\n"
+                "EOF")
+    assert result == expected
+
+
+def test_write_fortran_namelist_list_fields():
+    fd = io.StringIO()
+    input_data = {
+        "PRESS_AI": {
+            "amass": 28.0855,
+            "niter_ph": 50,
+            "tr2_ph": 1e-6,
+            "flfrc": "silicon.fc"},
+    }
+    binary = "cp"
+    write_fortran_namelist(
+        fd,
+        input_data,
+        binary,
+        additional_cards=[
+            "test1",
+            "test2",
+            "test3"])
+    result = fd.getvalue()
+    expected = ("&CONTROL\n"
+                "/\n"
+                "&SYSTEM\n"
+                "/\n"
+                "&ELECTRONS\n"
+                "/\n"
+                "&IONS\n"
+                "/\n"
+                "&CELL\n"
+                "/\n"
+                "&PRESS_AI\n"
+                "   amass            = 28.0855\n"
+                "   niter_ph         = 50\n"
+                "   tr2_ph           = 1e-06\n"
+                "   flfrc            = 'silicon.fc'\n"
+                "/\n"
+                "&WANNIER\n"
+                "/\n"
+                "test1\n"
+                "test2\n"
+                "test3\n"
+                "EOF")
+    assert result == expected
+
+
+class TestConstraints:
+    """Test if the constraint can be recovered when writing and reading.
+
+    Notes
+    -----
+    Linear constraints in the ATOMIC_POSITIONS block in the quantum ESPRESSO
+    `.pwi` format apply to Cartesian coordinates, regardless of whether the
+    atomic positions are written in the "angstrom" or the "crystal" units.
+    """
+
+    # TODO: test also mask for FixCartesian
+
+    @staticmethod
+    def _make_atoms_ref():
+        """water molecule"""
+        atoms = ase.build.molecule("H2O")
+        atoms.cell = 10.0 * np.eye(3)
+        atoms.pbc = True
+        atoms.set_initial_magnetic_moments(len(atoms) * [0.0])
+        return atoms
+
+    def _apply_write_read(self, constraint) -> Atoms:
+        atoms_ref = self._make_atoms_ref()
+        atoms_ref.set_constraint(constraint)
+
+        pseudopotentials = {
+            "H": "h_lda_v1.2.uspp.F.UPF",
+            "O": "o_lda_v1.2.uspp.F.UPF",
+        }
+        buf = io.StringIO()
+        write_espresso_in(buf, atoms_ref, pseudopotentials=pseudopotentials)
+        buf.seek(0)
+        atoms = read_espresso_in(buf)
+
+        assert not compare_atoms(atoms_ref, atoms)
+
+        print(atoms_ref.constraints, atoms.constraints)
+
+        return atoms
+
+    def test_fix_atoms(self):
+        """Test FixAtoms"""
+        constraint = FixAtoms(indices=(1, 2))
+        atoms = self._apply_write_read(constraint)
+
+        assert len(atoms.constraints) == 1
+        assert isinstance(atoms.constraints[0], FixAtoms)
+        assert all(atoms.constraints[0].index == constraint.index)
+
+    def test_fix_cartesian_line(self):
+        """Test FixCartesian along line"""
+        # moved only along the z direction
+        constraint = FixCartesian(0, mask=(1, 1, 0))
+        atoms = self._apply_write_read(constraint)
+
+        assert len(atoms.constraints) == 1
+        assert isinstance(atoms.constraints[0], FixCartesian)
+        assert all(atoms.constraints[0].index == constraint.index)
+
+    def test_fix_cartesian_plane(self):
+        """Test FixCartesian in plane"""
+        # moved only in the yz plane
+        constraint = FixCartesian((1, 2), mask=(1, 0, 0))
+        atoms = self._apply_write_read(constraint)
+
+        assert len(atoms.constraints) == 1
+        assert isinstance(atoms.constraints[0], FixCartesian)
+        assert all(atoms.constraints[0].index == constraint.index)
+
+    def test_fix_cartesian_multiple(self):
+        """Test multiple FixCartesian"""
+        constraint = [FixCartesian(1), FixCartesian(2)]
+        atoms = self._apply_write_read(constraint)
+
+        assert len(atoms.constraints) == 1
+        assert isinstance(atoms.constraints[0], FixAtoms)
+        assert atoms.constraints[0].index.tolist() == [1, 2]
+
+    def test_fix_scaled(self):
+        """Test FixScaled"""
+        constraint = FixScaled(0, mask=(1, 1, 0))
+        with pytest.raises(UserWarning):
+            self._apply_write_read(constraint)

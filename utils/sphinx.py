@@ -1,19 +1,15 @@
 import os
+import re
+import runpy
 import traceback
 import warnings
 from os.path import join
+from pathlib import Path
 from stat import ST_MTIME
-import re
-import runpy
+from subprocess import DEVNULL, CalledProcessError, check_call
 
 from docutils import nodes
 from docutils.parsers.rst.roles import set_classes
-
-from subprocess import check_call, DEVNULL, CalledProcessError
-from pathlib import Path
-
-import matplotlib
-matplotlib.use('Agg')
 
 
 def mol_role(role, rawtext, text, lineno, inliner, options={}, content=[]):
@@ -55,7 +51,7 @@ def git_role_tmpl(urlroot,
     path = os.path.join('..', text)
     do_exists = os.path.exists(path)
     if not (is_tag or do_exists):
-        msg = 'Broken link: {}: Non-existing path: {}'.format(rawtext, path)
+        msg = f'Broken link: {rawtext}: Non-existing path: {path}'
         msg = inliner.reporter.error(msg, line=lineno)
         prb = inliner.problematic(rawtext, rawtext, msg)
         return [prb], [msg]
@@ -66,6 +62,18 @@ def git_role_tmpl(urlroot,
     return [node], []
 
 
+def git_role(role, rawtext, text, lineno, inliner, options={}, content=[]):
+    return git_role_tmpl('https://gitlab.com/ase/ase/blob/master/',
+                         role,
+                         rawtext, text, lineno, inliner, options, content)
+
+
+def setup(app):
+    app.add_role('mol', mol_role)
+    app.add_role('git', git_role)
+    create_png_files()
+
+
 def creates():
     """Generator for Python scripts and their output filenames."""
     for dirpath, dirnames, filenames in sorted(os.walk('.')):
@@ -73,7 +81,7 @@ def creates():
             # Skip files in the build/ folder
             continue
 
-        for filename in filenames:
+        for filename in sorted(filenames):
             if filename.endswith('.py'):
                 path = join(dirpath, filename)
                 with open(path) as fd:

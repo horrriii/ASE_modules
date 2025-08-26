@@ -1,9 +1,9 @@
-from ase.optimize import BFGS
 from ase.atoms import Atoms
 from ase.calculators.crystal import CRYSTAL
+from ase.optimize import BFGS
 
 
-def test_molecule(testdir):
+def test_molecule(crystal_factory):
     with open('basis', 'w') as fd:
         fd.write("""6 4
     0 0 6 2.0 1.0

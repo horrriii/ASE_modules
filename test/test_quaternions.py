@@ -1,5 +1,6 @@
-import pytest
 import numpy as np
+import pytest
+
 from ase.quaternions import Quaternion
 
 TEST_N = 200
@@ -41,7 +42,7 @@ def eulang_rotm(a, b, c, mode='zyz'):
     return np.dot(rotc, np.dot(rotb, rota))
 
 
-@pytest.fixture
+@pytest.fixture()
 def rng():
     return np.random.RandomState(0)
 
@@ -49,7 +50,7 @@ def rng():
 def test_quaternions_rotations(rng):
 
     # First: test that rotations DO work
-    for i in range(TEST_N):
+    for _ in range(TEST_N):
         # n random tests
 
         rotm = rand_rotm(rng)
@@ -81,8 +82,7 @@ def test_quaternions_gimbal(rng):
 def test_quaternions_overload(rng):
 
     # Third: test compound rotations and operator overload
-    for i in range(TEST_N):
-
+    for _ in range(TEST_N):
         rotm1 = rand_rotm(rng)
         rotm2 = rand_rotm(rng)
 
@@ -100,41 +100,38 @@ def test_quaternions_overload(rng):
         assert np.allclose(vrotM, vrotQ)
 
 
-def test_quaternions_euler(rng):
-
+@pytest.mark.parametrize('mode', ['zyz', 'zxz'])
+def test_quaternions_euler(rng: np.random.RandomState, mode: str):
     # Fourth: test Euler angles
-    for mode in ['zyz', 'zxz']:
-        for i in range(TEST_N):
+    for _ in range(TEST_N):
+        a, c = rng.uniform(-np.pi, np.pi, size=2)
+        b = rng.uniform(0, np.pi)
 
-            abc = rng.random(3) * 2 * np.pi
+        q_eul = Quaternion.from_euler_angles(a, b, c, mode=mode)
+        rot_eul = eulang_rotm(a, b, c, mode=mode)
+        assert np.allclose(rot_eul, q_eul.rotation_matrix())
 
-            q_eul = Quaternion.from_euler_angles(*abc, mode=mode)
-            rot_eul = eulang_rotm(*abc, mode=mode)
-
-            assert(np.allclose(rot_eul, q_eul.rotation_matrix()))
-
-            # Test conversion back and forth
-            abc_2 = q_eul.euler_angles(mode=mode)
-            q_eul_2 = Quaternion.from_euler_angles(*abc_2, mode=mode)
-
-            assert(np.allclose(q_eul_2.q, q_eul.q))
+        # Test conversion back and forth
+        a2, b2, c2 = q_eul.euler_angles(mode=mode)
+        assert np.allclose([a2, b2, c2], [a, b, c])
+        q_eul_2 = Quaternion.from_euler_angles(a2, b2, c2, mode=mode)
+        assert np.allclose(q_eul_2.q, q_eul.q)
 
 
 def test_quaternions_rotm(rng):
 
     # Fifth: test that conversion back to rotation matrices works properly
-    for i in range(TEST_N):
-
+    for _ in range(TEST_N):
         rotm1 = rand_rotm(rng)
         rotm2 = rand_rotm(rng)
 
         q1 = Quaternion.from_matrix(rotm1)
         q2 = Quaternion.from_matrix(rotm2)
 
-        assert(np.allclose(q1.rotation_matrix(), rotm1))
-        assert(np.allclose(q2.rotation_matrix(), rotm2))
-        assert(np.allclose((q1 * q2).rotation_matrix(), np.dot(rotm1, rotm2)))
-        assert(np.allclose((q1 * q2).rotation_matrix(), np.dot(rotm1, rotm2)))
+        assert np.allclose(q1.rotation_matrix(), rotm1)
+        assert np.allclose(q2.rotation_matrix(), rotm2)
+        assert np.allclose((q1 * q2).rotation_matrix(), np.dot(rotm1, rotm2))
+        assert np.allclose((q1 * q2).rotation_matrix(), np.dot(rotm1, rotm2))
 
 
 def test_quaternions_axang(rng):
@@ -142,7 +139,7 @@ def test_quaternions_axang(rng):
     # Sixth: test conversion to axis + angle
     q = Quaternion()
     n, theta = q.axis_angle()
-    assert(theta == 0)
+    assert theta == 0
 
     u = np.array([1, 0.5, 1])
     u /= np.linalg.norm(u)
@@ -151,5 +148,54 @@ def test_quaternions_axang(rng):
     q = Quaternion.from_matrix(axang_rotm(u, alpha))
     n, theta = q.axis_angle()
 
-    assert(np.isclose(theta, alpha))
-    assert(np.allclose(u, n))
+    assert np.isclose(theta, alpha)
+    assert np.allclose(u, n)
+
+
+@pytest.mark.parametrize(
+    'q,euler_angles,mode,rotation_matrix,axis,angle', [
+        # pi/2 rotation along z axis
+        (
+            np.array([np.cos(np.pi / 4), 0, 0, np.sin(np.pi / 4)]),
+            np.array([0, 0, np.pi / 2]),  # We use alpha=0 for singular case
+            'zyz',
+            np.array([
+                [0, -1, 0],
+                [1, 0, 0],
+                [0, 0, 1],
+            ]),
+            np.array([0, 0, 1]),
+            np.pi / 2,
+        ),
+        # pi/2 rotation along x axis
+        (
+            np.array([np.cos(np.pi / 4), np.sin(np.pi / 4), 0, 0]),
+            np.array([np.pi / 2, np.pi / 2, -np.pi / 2]),
+            'zyz',
+            np.array([
+                [1, 0, 0],
+                [0, 0, -1],
+                [0, 1, 0],
+            ]),
+            np.array([1, 0, 0]),
+            np.pi / 2,
+        ),
+    ]
+)
+def test_quaternions_special_cases(
+    q, euler_angles, mode, rotation_matrix, axis, angle
+):
+    quaternions = [
+        Quaternion(q),
+        Quaternion.from_euler_angles(*euler_angles, mode=mode),
+        Quaternion.from_matrix(rotation_matrix),
+        Quaternion.from_axis_angle(axis, angle),
+    ]
+    for quaternion in quaternions:
+        axis_actual, angle_actual = quaternion.axis_angle()
+
+        assert np.allclose(quaternion.q, q)
+        assert np.allclose(quaternion.euler_angles(), euler_angles)
+        assert np.allclose(quaternion.rotation_matrix(), rotation_matrix)
+        assert np.allclose(axis_actual, axis)
+        assert np.isclose(angle_actual, angle)

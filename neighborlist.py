@@ -1,13 +1,14 @@
-import numpy as np
 import itertools
+
+import numpy as np
+import scipy.sparse.csgraph as csgraph
 from scipy import sparse as sp
 from scipy.spatial import cKDTree
-import scipy.sparse.csgraph as csgraph
 
-from ase.data import atomic_numbers, covalent_radii
-from ase.geometry import complete_cell, find_mic, wrap_positions
-from ase.geometry import minkowski_reduce
 from ase.cell import Cell
+from ase.data import atomic_numbers, covalent_radii
+from ase.geometry import (complete_cell, find_mic, minkowski_reduce,
+                          wrap_positions)
 
 
 def natural_cutoffs(atoms, mult=1, **kwargs):
@@ -701,25 +702,34 @@ def get_connectivity_matrix(nl, sparse=True):
 
     Determine which molecule in a system atom 1 belongs to.
 
-    >>> from ase import neighborlist
-    >>> from ase.build import molecule
     >>> from scipy import sparse
+
+    >>> from ase.build import molecule
+    >>> from ase.neighborlist import get_connectivity_matrix
+    >>> from ase.neighborlist import natural_cutoffs
+    >>> from ase.neighborlist import NeighborList
+
     >>> mol = molecule('CH3CH2OH')
-    >>> cutOff = neighborlist.natural_cutoffs(mol)
-    >>> neighborList = neighborlist.NeighborList(
-    ...     cutOff, self_interaction=False, bothways=True)
-    >>> neighborList.update(mol)
-    >>> matrix = neighborList.get_connectivity_matrix()
-    >>> #or: matrix = neighborlist.get_connectivity_matrix(neighborList.nl)
+    >>> cutoffs = natural_cutoffs(mol)
+    >>> neighbor_list = NeighborList(
+    ...     cutoffs, self_interaction=False, bothways=True)
+    >>> neighbor_list.update(mol)
+    True
+
+    >>> matrix = neighbor_list.get_connectivity_matrix()
+    >>> # or: matrix = get_connectivity_matrix(neighbor_list.nl)
     >>> n_components, component_list = sparse.csgraph.connected_components(
     ...    matrix)
     >>> idx = 1
     >>> molIdx = component_list[idx]
     >>> print("There are {} molecules in the system".format(n_components))
+    There are 1 molecules in the system
     >>> print("Atom {} is part of molecule {}".format(idx, molIdx))
+    Atom 1 is part of molecule 0
     >>> molIdxs = [i for i in range(len(component_list))
     ...            if component_list[i] == molIdx]
     >>> print("Atoms are part of molecule {}: {}".format(molIdx, molIdxs))
+    Atoms are part of molecule 0: [0, 1, 2, 3, 4, 5, 6, 7, 8]
     """
 
     nAtoms = len(nl.cutoffs)
@@ -762,11 +772,16 @@ class NewPrimitiveNeighborList:
         Return all neighbors.  Default is to return only "half" of
         the neighbors.
 
-    Example::
+    Example:
 
-      nl = NeighborList([2.3, 1.7])
-      nl.update(atoms)
-      indices, offsets = nl.get_neighbors(0)
+    >>> from ase.build import bulk
+    >>> from ase.neighborlist import NewPrimitiveNeighborList
+
+    >>> nl = NewPrimitiveNeighborList([2.3, 1.7])
+    >>> atoms = bulk('Cu', 'fcc', a=3.6)
+    >>> nl.update(atoms.pbc, atoms.get_cell(), atoms.positions)
+    True
+    >>> indices, offsets = nl.get_neighbors(0)
     """
 
     def __init__(self, cutoffs, skin=0.3, sorted=False, self_interaction=True,
@@ -845,9 +860,19 @@ class NewPrimitiveNeighborList:
         returned.  The positions of the neighbor atoms can be
         calculated like this:
 
-        >>>  indices, offsets = nl.get_neighbors(42)
-        >>>  for i, offset in zip(indices, offsets):
-        >>>      print(atoms.positions[i] + dot(offset, atoms.get_cell()))
+        >>> from ase.build import bulk
+        >>> from ase.neighborlist import NewPrimitiveNeighborList
+
+        >>> nl = NewPrimitiveNeighborList([2.3, 1.7])
+        >>> atoms = bulk('Cu', 'fcc', a=3.6)
+        >>> nl.update(atoms.pbc, atoms.get_cell(), atoms.positions)
+        True
+        >>> indices, offsets = nl.get_neighbors(0)
+        >>> for i, offset in zip(indices, offsets):
+        ...     print(
+        ...           atoms.positions[i] + offset @ atoms.get_cell()
+        ...     )  # doctest: +ELLIPSIS
+        [3.6 ... 0. ]
 
         Notice that if get_neighbors(a) gives atom b as a neighbor,
         then get_neighbors(b) will not return a as a neighbor - unless
@@ -863,6 +888,11 @@ class PrimitiveNeighborList:
     This is less fancy, but can be used to avoid conversions between
     scaled and non-scaled coordinates which may affect cell offsets
     through rounding errors.
+
+    Attributes
+    ----------
+    nupdates : int
+        Number of updated times.
     """
 
     def __init__(self, cutoffs, skin=0.3, sorted=False, self_interaction=True,
@@ -878,7 +908,13 @@ class PrimitiveNeighborList:
         self.npbcneighbors = 0
 
     def update(self, pbc, cell, coordinates):
-        """Make sure the list is up to date."""
+        """Make sure the list is up to date.
+
+        Returns
+        -------
+        bool
+            True if the neighbor list is updated.
+        """
 
         if self.nupdates == 0:
             self.build(pbc, cell, coordinates)
@@ -903,7 +939,7 @@ class PrimitiveNeighborList:
         self.coordinates = coordinates = np.array(coordinates, copy=True)
 
         if len(self.cutoffs) != len(coordinates):
-            raise ValueError('Wrong number of cutoff radii: {0} != {1}'
+            raise ValueError('Wrong number of cutoff radii: {} != {}'
                              .format(len(self.cutoffs), len(coordinates)))
 
         if len(self.cutoffs) > 0:
@@ -922,8 +958,8 @@ class PrimitiveNeighborList:
         natoms = len(positions)
         self.nneighbors = 0
         self.npbcneighbors = 0
-        self.neighbors = [np.empty(0, int) for a in range(natoms)]
-        self.displacements = [np.empty((0, 3), int) for a in range(natoms)]
+        self.neighbors = [np.empty(0, int) for _ in range(natoms)]
+        self.displacements = [np.empty((0, 3), int) for _ in range(natoms)]
         self.nupdates += 1
         if natoms == 0:
             return
@@ -943,7 +979,7 @@ class PrimitiveNeighborList:
         offsets = cell.scaled_positions(positions - positions0)
         offsets = offsets.round().astype(int)
 
-        for n1, n2, n3 in itertools.product(range(0, N[0] + 1),
+        for n1, n2, n3 in itertools.product(range(N[0] + 1),
                                             range(-N[1], N[1] + 1),
                                             range(-N[2], N[2] + 1)):
             if n1 == 0 and (n2 < 0 or n2 == 0 and n3 < 0):
@@ -980,6 +1016,9 @@ class PrimitiveNeighborList:
             displacements2 = [[] for a in range(natoms)]
             for a in range(natoms):
                 for b, disp in zip(self.neighbors[a], self.displacements[a]):
+                    # avoid double counting of self interaction
+                    if a == b and (disp == 0).all():
+                        continue
                     neighbors2[b].append(a)
                     displacements2[b].append(-disp)
             for a in range(natoms):
@@ -990,30 +1029,38 @@ class PrimitiveNeighborList:
                 self.displacements[a] = disp.astype(int).reshape((-1, 3))
 
         if self.sorted:
-            for a, i in enumerate(self.neighbors):
-                mask = (i < a)
-                if mask.any():
-                    j = i[mask]
-                    offsets = self.displacements[a][mask]
-                    for b, offset in zip(j, offsets):
-                        self.neighbors[b] = np.concatenate(
-                            (self.neighbors[b], [a]))
-                        self.displacements[b] = np.concatenate(
-                            (self.displacements[b], [-offset]))
-                    mask = np.logical_not(mask)
-                    self.neighbors[a] = self.neighbors[a][mask]
-                    self.displacements[a] = self.displacements[a][mask]
+            for a in range(natoms):
+                # sort first by neighbors and then offsets
+                keys = (
+                    self.displacements[a][:, 2],
+                    self.displacements[a][:, 1],
+                    self.displacements[a][:, 0],
+                    self.neighbors[a],
+                )
+                mask = np.lexsort(keys)
+                self.neighbors[a] = self.neighbors[a][mask]
+                self.displacements[a] = self.displacements[a][mask]
 
     def get_neighbors(self, a):
         """Return neighbors of atom number a.
 
         A list of indices and offsets to neighboring atoms is
         returned.  The positions of the neighbor atoms can be
-        calculated like this::
+        calculated like this:
 
-          indices, offsets = nl.get_neighbors(42)
-          for i, offset in zip(indices, offsets):
-              print(atoms.positions[i] + offset @ atoms.get_cell())
+        >>> from ase.build import bulk
+        >>> from ase.neighborlist import NewPrimitiveNeighborList
+
+        >>> nl = NewPrimitiveNeighborList([2.3, 1.7])
+        >>> atoms = bulk('Cu', 'fcc', a=3.6)
+        >>> nl.update(atoms.pbc, atoms.get_cell(), atoms.positions)
+        True
+        >>> indices, offsets = nl.get_neighbors(0)
+        >>> for i, offset in zip(indices, offsets):
+        ...     print(
+        ...           atoms.positions[i] + offset @ atoms.get_cell()
+        ...     )  # doctest: +ELLIPSIS
+        [3.6 ... 0. ]
 
         Notice that if get_neighbors(a) gives atom b as a neighbor,
         then get_neighbors(b) will not return a as a neighbor - unless
@@ -1049,11 +1096,16 @@ class NeighborList:
         :class:`~ase.neighborlist.PrimitiveNeighborList` or newer and
         linearly-scaling :class:`~ase.neighborlist.NewPrimitiveNeighborList`.
 
-    Example::
+    Example:
 
-      nl = NeighborList([2.3, 1.7])
-      nl.update(atoms)
-      indices, offsets = nl.get_neighbors(0)
+    >>> from ase.build import molecule
+    >>> from ase.neighborlist import NeighborList
+
+    >>> atoms = molecule("CO")
+    >>> nl = NeighborList([0.76, 0.66])
+    >>> nl.update(atoms)
+    True
+    >>> indices, offsets = nl.get_neighbors(0)
 
     """
 

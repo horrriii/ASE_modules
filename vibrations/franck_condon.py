@@ -1,11 +1,11 @@
 from functools import reduce
-from itertools import combinations, chain
+from itertools import chain, combinations
 from math import factorial
 from operator import mul
 
 import numpy as np
 
-from ase.units import kg, C, _hbar, kB
+from ase.units import C, _hbar, kB, kg
 from ase.vibrations import Vibrations
 
 
@@ -104,7 +104,7 @@ class FranckCondonRecursive:
         if m == 0:
             return np.exp(-0.25 * delta**2)
         else:
-            assert(m > 0)
+            assert m > 0
             return - delta / np.sqrt(2 * m) * self.ov0m(m - 1, delta)
 
     def ov1m(self, m, delta):
@@ -112,7 +112,7 @@ class FranckCondonRecursive:
         if m == 0:
             return sum
         else:
-            assert(m > 0)
+            assert m > 0
             return sum + np.sqrt(m) * self.ov0m(m - 1, delta)
 
     def ov2m(self, m, delta):
@@ -120,7 +120,7 @@ class FranckCondonRecursive:
         if m == 0:
             return sum
         else:
-            assert(m > 0)
+            assert m > 0
             return sum + np.sqrt(m / 2.) * self.ov1m(m - 1, delta)
 
     def ov3m(self, m, delta):
@@ -128,7 +128,7 @@ class FranckCondonRecursive:
         if m == 0:
             return sum
         else:
-            assert(m > 0)
+            assert m > 0
             return sum + np.sqrt(m / 3.) * self.ov2m(m - 1, delta)
 
     def ov0mm1(self, m, delta):
@@ -233,7 +233,7 @@ class FranckCondon:
         the first approximation of FC factors,
         no combinations or higher quanta (>1) exitations are considered"""
 
-        assert(forces.shape == self.shape)
+        assert forces.shape == self.shape
 
         # Hesse matrix
         H_VV = self.H
@@ -326,7 +326,7 @@ class FranckCondon:
         E = freq / 8065.5
         f_n = [[] * i for i in range(n)]
 
-        for j in range(0, n):
+        for j in range(n):
             f_n[j] = np.exp(-E * j / (kB * T))
 
         # partition function

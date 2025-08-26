@@ -1,20 +1,23 @@
-import sys
 import os
-from pathlib import Path
-from subprocess import Popen, PIPE, check_output
+import shutil
+import tempfile
 import zlib
+from pathlib import Path
+from subprocess import PIPE, Popen, check_output
 
-import pytest
 import numpy as np
+import pytest
 
 import ase
-from ase.utils import workdir, seterr, get_python_package_path_description
-from ase.test.factories import (CalculatorInputs,
-                                factory_classes,
-                                NoSuchCalculator,
-                                get_factories,
-                                make_factory_fixture)
+from ase.config import Config, cfg
 from ase.dependencies import all_dependencies
+from ase.test.factories import CalculatorInputs, NoSuchCalculator
+from ase.test.factories import factory as factory_deco
+from ase.test.factories import (factory_classes, get_factories,
+                                legacy_factory_calculator_names,
+                                make_factory_fixture,
+                                parametrize_calculator_tests)
+from ase.utils import get_python_package_path_description, seterr, workdir
 
 helpful_message = """\
  * Use --calculators option to select calculators.
@@ -28,7 +31,13 @@ helpful_message = """\
 """
 
 
-def pytest_report_header(config, startdir):
+@pytest.fixture(scope='session')
+def testconfig():
+    from ase.test.factories import MachineInformation
+    return MachineInformation().cfg
+
+
+def pytest_report_header(config, start_path):
     yield from library_header()
     yield ''
     yield from calculators_header(config)
@@ -40,7 +49,7 @@ def library_header():
     yield '========='
     yield ''
     for name, path in all_dependencies():
-        yield '{:24} {}'.format(name, path)
+        yield f'{name:24} {path}'
 
 
 def calculators_header(config):
@@ -49,8 +58,10 @@ def calculators_header(config):
     except NoSuchCalculator as err:
         pytest.exit(f'No such calculator: {err}')
 
-    configpaths = factories.executable_config_paths
-    module = factories.datafiles_module
+    machine_info = factories.machine_info
+    configpaths = machine_info.cfg.paths
+    # XXX FIXME may not be installed
+    module = machine_info.datafiles_module
 
     yield ''
     yield 'Calculators'
@@ -78,13 +89,19 @@ def calculators_header(config):
         factory = factories.factories.get(name)
 
         if factory is None:
-            configinfo = 'not installed'
+            why_not = factories.why_not[name]
+            configinfo = f'not installed: {why_not}'
         else:
             # Some really ugly hacks here:
             if hasattr(factory, 'importname'):
-                import importlib
-                module = importlib.import_module(factory.importname)
-                configinfo = get_python_package_path_description(module)
+                pass
+                # We want an to report from where we import calculators
+                # that are defined in Python, but that's currently disabled.
+                #
+                # import importlib
+                # XXXX reenable me somehow
+                # module = importlib.import_module(factory.importname)
+                # configinfo = get_python_package_path_description(module)
             else:
                 configtokens = []
                 for varname, variable in vars(factory).items():
@@ -120,12 +137,6 @@ def calculators_header(config):
 
 
 @pytest.fixture(scope='session', autouse=True)
-def monkeypatch_disabled_calculators(request, factories):
-    # XXX Replace with another mechanism.
-    factories.monkeypatch_disabled_calculators()
-
-
-@pytest.fixture(scope='session', autouse=True)
 def sessionlevel_testing_path():
     # We cd into a tempdir so tests and fixtures won't create files
     # elsewhere (e.g. in the unsuspecting user's directory).
@@ -140,7 +151,6 @@ def sessionlevel_testing_path():
     # disturb other pytest runs if we use the pytest tempdir factory.
     #
     # So we use the tempfile module for this temporary directory.
-    import tempfile
     with tempfile.TemporaryDirectory(prefix='ase-test-workdir-') as tempdir:
         path = Path(tempdir)
         path.chmod(0o555)
@@ -153,19 +163,18 @@ def sessionlevel_testing_path():
 def testdir(tmp_path):
     # Pytest can on some systems provide a Path from pathlib2.  Normalize:
     path = Path(str(tmp_path))
+    print(f'Testdir: {path}')
     with workdir(path, mkdir=True):
         yield tmp_path
-    # We print the path so user can see where test failed, if it failed.
-    print(f'Testdir: {path}')
 
 
-@pytest.fixture
+@pytest.fixture()
 def allraise():
     with seterr(all='raise'):
         yield
 
 
-@pytest.fixture
+@pytest.fixture()
 def KIM():
     pytest.importorskip('kimpy')
     from ase.calculators.kim import KIM as _KIM
@@ -189,15 +198,13 @@ def tkinter():
     try:
         tkinter.Tk()
     except tkinter.TclError as err:
-        pytest.skip('no tkinter: {}'.format(err))
+        pytest.skip(f'no tkinter: {err}')
 
 
 @pytest.fixture(autouse=True)
 def _plt_close_figures():
+    import matplotlib.pyplot as plt
     yield
-    plt = sys.modules.get('matplotlib.pyplot')
-    if plt is None:
-        return
     fignums = plt.get_fignums()
     for fignum in fignums:
         plt.close(fignum)
@@ -205,23 +212,17 @@ def _plt_close_figures():
 
 @pytest.fixture(scope='session', autouse=True)
 def _plt_use_agg():
-    try:
-        import matplotlib
-    except ImportError:
-        pass
-    else:
-        matplotlib.use('Agg')
+    import matplotlib
+    matplotlib.use('Agg')
 
 
 @pytest.fixture(scope='session')
 def plt(_plt_use_agg):
-    pytest.importorskip('matplotlib')
-
     import matplotlib.pyplot as plt
     return plt
 
 
-@pytest.fixture
+@pytest.fixture()
 def figure(plt):
     fig = plt.figure()
     yield fig
@@ -248,21 +249,52 @@ gpaw_factory = make_factory_fixture('gpaw')
 mopac_factory = make_factory_fixture('mopac')
 octopus_factory = make_factory_fixture('octopus')
 siesta_factory = make_factory_fixture('siesta')
+orca_factory = make_factory_fixture('orca')
 
 
-@pytest.fixture
+def make_dummy_factory(name):
+    @factory_deco(name)
+    class Factory:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def calc(self, **kwargs):
+            from ase.calculators.calculator import get_calculator_class
+            cls = get_calculator_class(name)
+            return cls(**kwargs)
+
+        @classmethod
+        def fromconfig(cls, config):
+            return cls()
+
+    Factory.__name__ = f'{name.upper()}Factory'
+    globalvars = globals()
+    globalvars[f'{name}_factory'] = make_factory_fixture(name)
+
+
+for name in legacy_factory_calculator_names:
+    make_dummy_factory(name)
+
+
+@pytest.fixture()
 def factory(request, factories):
     name, kwargs = request.param
     if not factories.installed(name):
         pytest.skip(f'Not installed: {name}')
     if not factories.enabled(name):
         pytest.skip(f'Not enabled: {name}')
-    factory = factories[name]
+    # TODO: nice reporting of installedness and configuration
+    # if name in factories.builtin_calculators & factories.datafile_calculators:
+    #    if not factories.datafiles_module:
+    #        pytest.skip('ase-datafiles package not installed')
+    try:
+        factory = factories[name]
+    except KeyError:
+        pytest.skip(f'Not configured: {name}')
     return CalculatorInputs(factory, kwargs)
 
 
 def pytest_generate_tests(metafunc):
-    from ase.test.factories import parametrize_calculator_tests
     parametrize_calculator_tests(metafunc)
 
     if 'seed' in metafunc.fixturenames:
@@ -272,6 +304,72 @@ def pytest_generate_tests(metafunc):
         else:
             seeds = list(map(int, seeds))
         metafunc.parametrize('seed', seeds)
+
+
+@pytest.fixture()
+def override_config(monkeypatch):
+    parser = Config().parser
+    monkeypatch.setattr(cfg, 'parser', parser)
+    return cfg
+
+
+@pytest.fixture()
+def config_file(tmp_path, monkeypatch, override_config):
+    dummy_config = """\
+[parallel]
+runner = mpirun
+nprocs = -np
+stdout = --output-filename
+
+[abinit]
+command = /home/ase/calculators/abinit/bin/abinit
+abipy_mrgddb = /home/ase/calculators/abinit/bin/mrgddb
+abipy_anaddb = /home/ase/calculators/abinit/bin/anaddb
+
+[cp2k]
+cp2k_shell = cp2k_shell
+cp2k_main = cp2k
+
+[dftb]
+command = /home/ase/calculators/dftbplus/bin/dftb+
+
+[dftd3]
+command = /home/ase/calculators/dftd3/bin/dftd3
+
+[elk]
+command = /usr/bin/elk-lapw
+
+[espresso]
+command = /home/ase/calculators/espresso/bin/pw.x
+pseudo_dir = /home/ase/.local/lib/python3.10/site-packages/asetest/\
+datafiles/espresso/gbrv-lda-espresso
+
+[exciting]
+command = /home/ase/calculators/exciting/bin/exciting
+
+[gromacs]
+command = gmx
+
+[lammps]
+command = /home/ase/calculators/lammps/bin/lammps
+
+[mopac]
+command = /home/ase/calculators/mopac/bin/mopac
+
+[nwchem]
+command = /home/ase/calculators/nwchem/bin/nwchem
+
+[octopus]
+command = /home/ase/calculators/octopus/bin/octopus
+
+[openmx]
+# command = /usr/bin/openmx
+
+[siesta]
+command = /home/ase/calculators/siesta/bin/siesta
+"""
+
+    override_config.parser.read_string(dummy_config)
 
 
 class CLI:
@@ -314,13 +412,6 @@ def datadir():
     return test_basedir / 'testdata'
 
 
-@pytest.fixture
-def pt_eam_potential_file(datadir):
-    # EAM potential for Pt from LAMMPS, also used with eam calculator.
-    # (Where should this fixture really live?)
-    return datadir / 'eam_Pt_u3.dat'
-
-
 @pytest.fixture(scope='session')
 def asap3():
     return pytest.importorskip('asap3')
@@ -360,7 +451,6 @@ def arbitrarily_seed_rng(request):
 
 @pytest.fixture(scope='session')
 def povray_executable():
-    import shutil
     exe = shutil.which('povray')
     if exe is None:
         pytest.skip('povray not installed')

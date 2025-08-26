@@ -17,17 +17,14 @@ __all__ = ['Spacegroup']
 
 class SpacegroupError(Exception):
     """Base exception for the spacegroup module."""
-    pass
 
 
 class SpacegroupNotFoundError(SpacegroupError):
     """Raised when given space group cannot be found in data base."""
-    pass
 
 
 class SpacegroupValueError(SpacegroupError):
     """Raised when arguments have invalid value."""
-    pass
 
 
 # Type alias
@@ -131,7 +128,7 @@ class Spacegroup:
             return
         if not datafile:
             datafile = get_datafile()
-        with open(datafile, 'r') as fd:
+        with open(datafile) as fd:
             _read_datafile(self, spacegroup, setting, fd)
 
     def __repr__(self):
@@ -594,8 +591,8 @@ def _skip_to_blank(f, spacegroup, setting):
         line = f.readline()
         if not line:
             raise SpacegroupNotFoundError(
-                'invalid spacegroup `%s`, setting `%s` not found in data base'
-                % (spacegroup, setting))
+                f'invalid spacegroup `{spacegroup}`, setting `{setting}` not '
+                'found in data base')
         if not line.strip():
             break
 
@@ -621,8 +618,8 @@ def _read_datafile_entry(spg, no, symbol, setting, f):
 
     floats = {'0.0': 0.0, '1.0': 1.0, '0': 0.0, '1': 1.0, '-1': -1.0}
     for n, d in [(1, 2), (1, 3), (2, 3), (1, 4), (3, 4), (1, 6), (5, 6)]:
-        floats['{0}/{1}'.format(n, d)] = n / d
-        floats['-{0}/{1}'.format(n, d)] = -n / d
+        floats[f'{n}/{d}'] = n / d
+        floats[f'-{n}/{d}'] = -n / d
 
     spg._no = no
     spg._symbol = symbol.strip()
@@ -631,9 +628,12 @@ def _read_datafile_entry(spg, no, symbol, setting, f):
     # primitive vectors
     f.readline()
     spg._scaled_primitive_cell = np.array(
-        [[float(floats.get(s, s)) for s in f.readline().split()]
-         for i in range(3)],
-        dtype=float)
+        [
+            [float(floats.get(s, s)) for s in f.readline().split()]
+            for _ in range(3)
+        ],
+        dtype=float,
+    )
     # primitive reciprocal vectors
     f.readline()
     spg._reciprocal_cell = np.array([[int(i) for i in f.readline().split()]
@@ -642,14 +642,21 @@ def _read_datafile_entry(spg, no, symbol, setting, f):
     # subtranslations
     spg._nsubtrans = int(f.readline().split()[0])
     spg._subtrans = np.array(
-        [[float(floats.get(t, t)) for t in f.readline().split()]
-         for i in range(spg._nsubtrans)],
-        dtype=float)
+        [
+            [float(floats.get(t, t)) for t in f.readline().split()]
+            for _ in range(spg._nsubtrans)
+        ],
+        dtype=float,
+    )
     # symmetry operations
     nsym = int(f.readline().split()[0])
-    symop = np.array([[float(floats.get(s, s)) for s in f.readline().split()]
-                      for i in range(nsym)],
-                     dtype=float)
+    symop = np.array(
+        [
+            [float(floats.get(s, s)) for s in f.readline().split()]
+            for _ in range(nsym)
+        ],
+        dtype=float,
+    )
     spg._nsymop = nsym
     spg._rotations = np.array(symop[:, :9].reshape((nsym, 3, 3)), dtype=int)
     spg._translations = symop[:, 9:]

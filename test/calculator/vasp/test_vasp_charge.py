@@ -1,15 +1,16 @@
 import pytest
+
 from ase.build import bulk
 
 calc = pytest.mark.calculator
 
 
-@pytest.fixture
+@pytest.fixture()
 def system():
     return bulk('Al', 'fcc', a=4.5, cubic=True)
 
 
-@pytest.fixture
+@pytest.fixture()
 def expected_nelect_from_vasp():
     # Expected number of electrons from the specified system
     # with no charge

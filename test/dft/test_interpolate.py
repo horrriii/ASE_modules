@@ -1,6 +1,9 @@
+import numpy as np
+
+from ase.dft.kpoints import monkhorst_pack_interpolate
+
+
 def test_interpolate():
-    import numpy as np
-    from ase.dft.kpoints import monkhorst_pack_interpolate
 
     eps = [0, 1, 2]
     path = [[0, 0, 0], [-0.25, 0, 0]]

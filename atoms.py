@@ -8,17 +8,17 @@ object.
 """
 import copy
 import numbers
-from math import cos, sin, pi
+from math import cos, pi, sin
 
 import numpy as np
 
 import ase.units as units
 from ase.atom import Atom
 from ase.cell import Cell
-from ase.stress import voigt_6_to_full_3x3_stress, full_3x3_to_voigt_6_stress
 from ase.data import atomic_masses, atomic_masses_common
+from ase.stress import full_3x3_to_voigt_6_stress, voigt_6_to_full_3x3_stress
 from ase.symbols import Symbols, symbols2numbers
-from ase.utils import deprecated
+from ase.utils import deprecated, string2index
 
 
 class Atoms:
@@ -102,6 +102,8 @@ class Atoms:
     Examples:
 
     These three are equivalent:
+
+    >>> from ase import Atom
 
     >>> d = 1.104  # N2 bondlength
     >>> a = Atoms('N2', [(0, 0, 0), (0, 0, d)])
@@ -266,20 +268,26 @@ class Atoms:
         new_symbols = Symbols.fromsymbols(obj)
         self.numbers[:] = new_symbols.numbers
 
-    @deprecated(DeprecationWarning('Please use atoms.calc = calc'))
+    @deprecated("Please use atoms.calc = calc", DeprecationWarning)
     def set_calculator(self, calc=None):
         """Attach calculator object.
 
-        Please use the equivalent atoms.calc = calc instead of this
-        method."""
+        .. deprecated:: 3.20.0
+            Please use the equivalent ``atoms.calc = calc`` instead of this
+            method.
+        """
+
         self.calc = calc
 
-    @deprecated(DeprecationWarning('Please use atoms.calc'))
+    @deprecated("Please use atoms.calc", DeprecationWarning)
     def get_calculator(self):
         """Get currently attached calculator object.
 
-        Please use the equivalent atoms.calc instead of
-        atoms.get_calculator()."""
+        .. deprecated:: 3.20.0
+            Please use the equivalent ``atoms.calc`` instead of
+            ``atoms.get_calculator()``.
+        """
+
         return self.calc
 
     @property
@@ -293,15 +301,24 @@ class Atoms:
         if hasattr(calc, 'set_atoms'):
             calc.set_atoms(self)
 
-    @calc.deleter  # type: ignore
-    @deprecated(DeprecationWarning('Please use atoms.calc = None'))
+    @calc.deleter
+    @deprecated('Please use atoms.calc = None', DeprecationWarning)
     def calc(self):
+        """Delete calculator
+
+        .. deprecated:: 3.20.0
+            Please use ``atoms.calc = None``
+        """
         self._calc = None
 
-    @property  # type: ignore
-    @deprecated('Please use atoms.cell.rank instead')
+    @property
+    @deprecated('Please use atoms.cell.rank instead', DeprecationWarning)
     def number_of_lattice_vectors(self):
-        """Number of (non-zero) lattice vectors."""
+        """Number of (non-zero) lattice vectors.
+
+        .. deprecated:: 3.21.0
+            Please use ``atoms.cell.rank`` instead
+        """
         return self.cell.rank
 
     def set_constraint(self, constraint=None):
@@ -406,7 +423,7 @@ class Atoms:
 
         return cell
 
-    @deprecated('Please use atoms.cell.cellpar() instead')
+    @deprecated('Please use atoms.cell.cellpar() instead', DeprecationWarning)
     def get_cell_lengths_and_angles(self):
         """Get unit cell parameters. Sequence of 6 numbers.
 
@@ -416,16 +433,22 @@ class Atoms:
             [len(a), len(b), len(c), angle(b,c), angle(a,c), angle(a,b)]
 
         in degrees.
+
+        .. deprecated:: 3.21.0
+            Please use ``atoms.cell.cellpar()`` instead
         """
         return self.cell.cellpar()
 
-    @deprecated('Please use atoms.cell.reciprocal()')
+    @deprecated('Please use atoms.cell.reciprocal()', DeprecationWarning)
     def get_reciprocal_cell(self):
         """Get the three reciprocal lattice vectors as a 3x3 ndarray.
 
         Note that the commonly used factor of 2 pi for Fourier
-        transforms is not included here."""
+        transforms is not included here.
 
+        .. deprecated:: 3.21.0
+            Please use ``atoms.cell.reciprocal()``
+        """
         return self.cell.reciprocal()
 
     @property
@@ -461,7 +484,7 @@ class Atoms:
                 a = a.copy()
 
         if name in self.arrays:
-            raise RuntimeError('Array {} already present'.format(name))
+            raise RuntimeError(f'Array {name} already present')
 
         for b in self.arrays.values():
             if len(a) != len(b):
@@ -470,8 +493,9 @@ class Atoms:
             break
 
         if shape is not None and a.shape[1:] != shape:
-            raise ValueError('Array "%s" has wrong shape %s != %s.' %
-                             (name, a.shape, (a.shape[0:1] + shape)))
+            raise ValueError(
+                f'Array "{name}" has wrong shape {a.shape} != '
+                f'{(a.shape[0:1] + shape)}.')
 
         self.arrays[name] = a
 
@@ -501,8 +525,9 @@ class Atoms:
             else:
                 a = np.asarray(a)
                 if a.shape != b.shape:
-                    raise ValueError('Array "%s" has wrong shape %s != %s.' %
-                                     (name, a.shape, b.shape))
+                    raise ValueError(
+                        f'Array "{name}" has wrong shape '
+                        f'{a.shape} != {b.shape}.')
                 b[:] = a
 
     def has(self, name):
@@ -976,10 +1001,8 @@ class Atoms:
     def fromdict(cls, dct):
         """Rebuild atoms object from dictionary representation (todict)."""
         dct = dct.copy()
-        kw = {}
-        for name in ['numbers', 'positions', 'cell', 'pbc']:
-            kw[name] = dct.pop(name)
-
+        kw = {name: dct.pop(name)
+              for name in ['numbers', 'positions', 'cell', 'pbc']}
         constraints = dct.pop('constraints', None)
         if constraints:
             from ase.constraints import dict2constraint
@@ -1003,14 +1026,17 @@ class Atoms:
     def __len__(self):
         return len(self.arrays['positions'])
 
+    @deprecated(
+        "Please use len(self) or, if your atoms are distributed, "
+        "self.get_global_number_of_atoms.",
+        category=FutureWarning,
+    )
     def get_number_of_atoms(self):
-        """Deprecated, please do not use.
-
-        You probably want len(atoms).  Or if your atoms are distributed,
-        use (and see) get_global_number_of_atoms()."""
-        import warnings
-        warnings.warn('Use get_global_number_of_atoms() instead',
-                      np.VisibleDeprecationWarning)
+        """
+        .. deprecated:: 3.18.1
+            You probably want ``len(atoms)``.  Or if your atoms are distributed,
+            use (and see) :func:`get_global_number_of_atoms()`.
+        """
         return len(self)
 
     def get_global_number_of_atoms(self):
@@ -1036,12 +1062,12 @@ class Atoms:
             symbols = self.get_chemical_formula('reduce')
         else:
             symbols = self.get_chemical_formula('hill')
-        tokens.append("symbols='{0}'".format(symbols))
+        tokens.append(f"symbols='{symbols}'")
 
         if self.pbc.any() and not self.pbc.all():
-            tokens.append('pbc={0}'.format(self.pbc.tolist()))
+            tokens.append(f'pbc={self.pbc.tolist()}')
         else:
-            tokens.append('pbc={0}'.format(self.pbc[0]))
+            tokens.append(f'pbc={self.pbc[0]}')
 
         cell = self.cell
         if cell:
@@ -1049,25 +1075,25 @@ class Atoms:
                 cell = cell.lengths().tolist()
             else:
                 cell = cell.tolist()
-            tokens.append('cell={0}'.format(cell))
+            tokens.append(f'cell={cell}')
 
         for name in sorted(self.arrays):
             if name in ['numbers', 'positions']:
                 continue
-            tokens.append('{0}=...'.format(name))
+            tokens.append(f'{name}=...')
 
         if self.constraints:
             if len(self.constraints) == 1:
                 constraint = self.constraints[0]
             else:
                 constraint = self.constraints
-            tokens.append('constraint={0}'.format(repr(constraint)))
+            tokens.append(f'constraint={constraint!r}')
 
         if self._calc is not None:
-            tokens.append('calculator={0}(...)'
+            tokens.append('calculator={}(...)'
                           .format(self._calc.__class__.__name__))
 
-        return '{0}({1})'.format(self.__class__.__name__, ', '.join(tokens))
+        return '{}({})'.format(self.__class__.__name__, ', '.join(tokens))
 
     def __add__(self, other):
         atoms = self.copy()
@@ -1219,7 +1245,7 @@ class Atoms:
                 raise ValueError('Cannot repeat along undefined lattice '
                                  'vector')
 
-        M = np.product(m)
+        M = np.prod(m)
         n = len(self)
 
         for name, a in self.arrays.items():
@@ -1337,23 +1363,33 @@ class Atoms:
 
         # Optionally, translate to center about a point in space.
         if about is not None:
-            for vector in self.cell:
-                translation -= vector / 2.0
-            translation += about
+            for n, vector in enumerate(self.cell):
+                if n in axes:
+                    translation -= vector / 2.0
+                    translation[n] += about[n]
 
         self.positions += translation
 
-    def get_center_of_mass(self, scaled=False):
+    def get_center_of_mass(self, scaled=False, indices=None):
         """Get the center of mass.
 
-        If scaled=True the center of mass in scaled coordinates
-        is returned."""
-        masses = self.get_masses()
-        com = masses @ self.positions / masses.sum()
+        Parameters
+        ----------
+        scaled : bool
+            If True, the center of mass in scaled coordinates is returned.
+        indices : list | slice | str, default: None
+            If specified, the center of mass of a subset of atoms is returned.
+        """
+        if indices is None:
+            indices = slice(None)
+        elif isinstance(indices, str):
+            indices = string2index(indices)
+
+        masses = self.get_masses()[indices]
+        com = masses @ self.positions[indices] / masses.sum()
         if scaled:
             return self.cell.scaled_positions(com)
-        else:
-            return com
+        return com  # Cartesian coordinates
 
     def set_center_of_mass(self, com, scaled=False):
         """Set the center of mass.
@@ -1757,11 +1793,14 @@ class Atoms:
         """Randomly displace atoms.
 
         This method adds random displacements to the atomic positions,
-        taking a possible constraint into account.  The random numbers are
+        taking a possible constraint into account. The random numbers are
         drawn from a normal distribution of standard deviation stdev.
 
-        For a parallel calculation, it is important to use the same
-        seed on all processors!  """
+        By default, the random number generator always uses the same seed (42)
+        for repeatability. You can provide your own seed (an integer), or if you
+        want the randomness to be different each time you run a script, then
+        provide `rng=numpy.random`. For a parallel calculation, it is important
+        to use the same seed on all processors!  """
 
         if seed is not None and rng is not None:
             raise ValueError('Please do not provide both seed and rng.')
@@ -1974,7 +2013,7 @@ class Atoms:
         """Get volume of unit cell."""
         if self.cell.rank != 3:
             raise ValueError(
-                'You have {0} lattice vectors: volume not defined'
+                'You have {} lattice vectors: volume not defined'
                 .format(self.cell.rank))
         return self.cell.volume
 
@@ -2021,6 +2060,10 @@ class Atoms:
     def iterimages(self):
         yield self
 
+    def __ase_optimizable__(self):
+        from ase.optimize.optimize import OptimizableAtoms
+        return OptimizableAtoms(self)
+
     def edit(self):
         """Modify atoms interactively through ASE's GUI viewer.
 
@@ -2031,8 +2074,8 @@ class Atoms:
         please set matplotlib.use('gtk') before calling this
         method.
         """
-        from ase.gui.images import Images
         from ase.gui.gui import GUI
+        from ase.gui.images import Images
         images = Images([self])
         gui = GUI(images)
         gui.run()

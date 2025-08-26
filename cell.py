@@ -1,9 +1,10 @@
-import ase
 from typing import Mapping, Sequence, Union
-import numpy as np
-from ase.utils.arraywrapper import arraylike
-from ase.utils import pbc2pbc
 
+import numpy as np
+
+import ase
+from ase.utils import pbc2pbc
+from ase.utils.arraywrapper import arraylike
 
 __all__ = ['Cell']
 
@@ -97,6 +98,8 @@ class Cell:
     def get_bravais_lattice(self, eps=2e-4, *, pbc=True):
         """Return :class:`~ase.lattice.BravaisLattice` for this cell:
 
+        >>> from ase.cell import Cell
+
         >>> cell = Cell.fromcellpar([4, 4, 4, 60, 60, 60])
         >>> print(cell.get_bravais_lattice())
         FCC(a=5.65685)
@@ -157,6 +160,9 @@ class Cell:
 
         Example
         -------
+
+        >>> from ase.cell import Cell
+
         >>> cell = Cell.fromcellpar([4, 4, 4, 60, 60, 60])
         >>> cell.bandpath('GXW', npoints=20)
         BandPath(path='GXW', cell=[3x3], special_points={GKLUWX}, kpts=[20x3])
@@ -205,7 +211,7 @@ class Cell:
 
         Equal to the number of nonzero lattice vectors."""
         # The name ndim clashes with ndarray.ndim
-        return sum(self.mask())  # type: ignore
+        return sum(self.mask())
 
     @property
     def orthorhombic(self) -> bool:
@@ -221,11 +227,8 @@ class Cell:
         """Return an array with the three angles alpha, beta, and gamma."""
         return self.cellpar()[3:].copy()
 
-    def __array__(self, dtype=float):
-        if dtype != float:
-            raise ValueError('Cannot convert cell to array of type {}'
-                             .format(dtype))
-        return self.array
+    def __array__(self, dtype=None, copy=False):
+        return np.array(self.array, dtype=dtype, copy=copy)
 
     def __bool__(self):
         return bool(self.any())  # need to convert from np.bool_
@@ -272,7 +275,7 @@ class Cell:
 
         Does not include factor of 2 pi."""
         icell = Cell(np.linalg.pinv(self).transpose())
-        icell[~self.mask()] = 0.0  # type: ignore
+        icell[~self.mask()] = 0.0  # type: ignore[index]
         return icell
 
     def normal(self, i):
@@ -299,7 +302,7 @@ class Cell:
         else:
             numbers = self.tolist()
 
-        return 'Cell({})'.format(numbers)
+        return f'Cell({numbers})'
 
     def niggli_reduce(self, eps=1e-5):
         """Niggli reduce this cell, returning a new cell and mapping.

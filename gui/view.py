@@ -7,10 +7,11 @@ from ase.calculators.calculator import PropertyNotImplementedError
 from ase.data import atomic_numbers
 from ase.data.colors import jmol_colors
 from ase.geometry import complete_cell
+from ase.gui.colors import ColorWindow
+from ase.gui.i18n import ngettext
+from ase.gui.render import Render
 from ase.gui.repeat import Repeat
 from ase.gui.rotate import Rotate
-from ase.gui.render import Render
-from ase.gui.colors import ColorWindow
 from ase.gui.utils import get_magmoms
 from ase.utils import rotate
 
@@ -91,12 +92,10 @@ class View:
 
         # XXX
         self.colormode = 'jmol'
-        self.colors = {}
-
-        for i, rgb in enumerate(jmol_colors):
-            self.colors[i] = ('#{0:02X}{1:02X}{2:02X}'
-                              .format(*(int(x * 255) for x in rgb)))
-
+        self.colors = {
+            i: ('#{:02X}{:02X}{:02X}'.format(*(int(x * 255) for x in rgb)))
+            for i, rgb in enumerate(jmol_colors)
+        }
         # scaling factors for vectors
         self.force_vector_scale = self.config['force_vector_scale']
         self.velocity_vector_scale = self.config['velocity_vector_scale']
@@ -121,13 +120,19 @@ class View:
 
         fname = self.images.filenames[frame]
         if fname is None:
-            title = 'ase.gui'
+            header = 'ase.gui'
         else:
-            title = basename(fname)
+            # fname is actually not necessarily the filename but may
+            # contain indexing like filename@0
+            header = basename(fname)
 
-        self.window.title = title
+        images_loaded_text = ngettext(
+            'one image loaded',
+            '{} images loaded',
+            len(self.images)
+        ).format(len(self.images))
 
-        self.call_observers()
+        self.window.title = f'{header} — {images_loaded_text}'
 
         if focus:
             self.focus()
@@ -206,7 +211,7 @@ class View:
             self.labels = list(get_magmoms(self.atoms))
         elif index == 4:
             Q = self.atoms.get_initial_charges()
-            self.labels = ['{0:.4g}'.format(q) for q in Q]
+            self.labels = [f'{q:.4g}' for q in Q]
         else:
             self.labels = self.atoms.get_chemical_symbols()
 
@@ -352,8 +357,8 @@ class View:
             scalars = np.ma.array(self.get_color_scalars())
             indices = np.clip(((scalars - cmin) / (cmax - cmin) * N +
                                0.5).astype(int),
-                              0, N - 1)
-        return [colorswhite[i] for i in indices.filled(N)]
+                              0, N - 1).filled(N)
+        return [colorswhite[i] for i in indices]
 
     def get_color_scalars(self, frame=None):
         if self.colormode == 'tag':
@@ -554,8 +559,7 @@ class View:
 
     def draw_frame_number(self):
         x, y = self.window.size
-        self.window.text(x, y, '{0}/{1}'.format(self.frame + 1,
-                                                len(self.images)),
+        self.window.text(x, y, '{}'.format(self.frame),
                          anchor='SE')
 
     def release(self, event):

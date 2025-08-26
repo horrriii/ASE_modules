@@ -1,12 +1,13 @@
-from ase.atoms import Atoms
 import numpy as np
-from ase.io.acemolecule import read_acemolecule_out, read_acemolecule_input
 import pytest
+
+import ase.units
+from ase.atoms import Atoms
+from ase.io.acemolecule import read_acemolecule_input, read_acemolecule_out
 
 
 def test_acemolecule_output():
 
-    import ase.units
     sample_outfile = """\
 
 ====================  Atoms  =====================

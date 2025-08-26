@@ -1,10 +1,11 @@
 import numpy as np
 import pytest
+
+from ase.calculators.combine_mm import CombineMM
+from ase.calculators.tip3p import TIP3P, epsilon0, sigma0
+from ase.constraints import FixBondLengths
 from ase.data import s22
 from ase.optimize import FIRE
-from ase.constraints import FixBondLengths
-from ase.calculators.tip3p import TIP3P, epsilon0, sigma0
-from ase.calculators.combine_mm import CombineMM
 
 
 def make_atoms():
@@ -29,7 +30,7 @@ def make_4mer():
     return atoms
 
 
-@pytest.mark.slow
+@pytest.mark.slow()
 def test_combine_mm2(testdir):
     # More biased initial positions for faster test. Set
     # to false for a slower, harder test.
@@ -39,7 +40,7 @@ def test_combine_mm2(testdir):
     atoms.constraints = FixBondLengths([(3 * i + j, 3 * i + (j + 1) % 3)
                                         for i in range(int(len(atoms) // 3))
                                         for j in [0, 1, 2]])
-    atoms.calc = TIP3P(np.Inf)
+    atoms.calc = TIP3P(np.inf)
     tag = '4mer_tip3_opt.'
     with FIRE(atoms, logfile=tag + 'log', trajectory=tag + 'traj') as opt:
         opt.run(fmax=0.05)
@@ -47,7 +48,7 @@ def test_combine_mm2(testdir):
 
     sig = np.array([sigma0, 0, 0])
     eps = np.array([epsilon0, 0, 0])
-    rc = np.Inf
+    rc = np.inf
     idxes = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11],
              list(range(6)), list(range(9)), list(range(6, 12))]
 
@@ -62,10 +63,9 @@ def test_combine_mm2(testdir):
         atoms.calc = CombineMM(idx, 3, 3, TIP3P(rc), TIP3P(rc),
                                sig, eps, sig, eps, rc=rc)
 
-        tag = '4mer_combtip3_opt_{0:02d}.'.format(ii)
+        tag = f'4mer_combtip3_opt_{ii:02d}.'
         with FIRE(atoms, logfile=tag + 'log', trajectory=tag + 'traj') as opt:
             opt.run(fmax=0.05)
-        assert((abs(atoms.positions - tip3_pos) < 1e-8).all())
-        print(
-            '{0}: {1!s:>28s}: Same Geometry as TIP3P'.format(
-                atoms.calc.name, idx))
+        assert (abs(atoms.positions - tip3_pos) < 1e-8).all()
+        print('{}: {!s:>28s}: Same Geometry as TIP3P'
+              .format(atoms.calc.name, idx))

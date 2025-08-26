@@ -2,8 +2,7 @@
 
 import pytest
 
-from ase.calculators.gromacs import parse_gromacs_version, get_gromacs_version
-
+from ase.calculators.gromacs import get_gromacs_version, parse_gromacs_version
 
 sample_header = """\
 blahblah...
@@ -54,7 +53,7 @@ data = """HISE for testing
    4.00000   4.00000   4.00000"""
 
 
-@pytest.mark.calculator_lite
+@pytest.mark.calculator_lite()
 @pytest.mark.calculator('gromacs')
 def test_gromacs(factory):
     GRO_INIT_FILE = 'hise_box.gro'

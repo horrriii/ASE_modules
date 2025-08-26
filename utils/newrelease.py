@@ -6,16 +6,15 @@ This script does not attempt to import ASE - then it would depend on
 which ASE is installed and how - but assumes that it is run from the
 ASE root directory."""
 
-import os
-import subprocess
-import re
 import argparse
-from time import strftime
+import os
+import re
 import shutil
+import subprocess
 from pathlib import Path
+from time import strftime
 
-
-os.environ['LANGUAGE'] = 'C'
+import ase
 
 
 def runcmd(cmd, output=False, error_ok=False):
@@ -28,7 +27,7 @@ def runcmd(cmd, output=False, error_ok=False):
             return subprocess.check_call(cmd, shell=True)
     except subprocess.CalledProcessError as err:
         if error_ok:
-            print('Failed: {}'.format(err))
+            print(f'Failed: {err}')
             print('Continuing...')
         else:
             raise
@@ -37,17 +36,19 @@ def runcmd(cmd, output=False, error_ok=False):
 bash = runcmd
 
 
-def py(cmd, output=False):
-    return runcmd('python3 {}'.format(cmd))
+def py(cmd):
+    return runcmd(f'python3 {cmd}')
 
 
 def git(cmd, error_ok=False):
-    cmd = 'git {}'.format(cmd)
+    cmd = f'git {cmd}'
     return runcmd(cmd, output=True, error_ok=error_ok)
 
 
-cwd = os.getcwd()
-versionfile = 'ase/__init__.py'
+versionfile = Path(ase.__file__)
+
+ase_toplevel = versionfile.parent.parent
+pyproject = ase_toplevel / 'pyproject.toml'
 
 
 def get_version():
@@ -72,47 +73,52 @@ def main():
         p.error('Cannot get version: {}.  Are you in the root directory?'
                 .format(err))
 
-    print('Current version: {}'.format(current_version))
+    print(f'Current version: {current_version}')
 
     version = args.version[0]
 
-    branchname = 'ase-{}'.format(version)
+    branchname = f'ase-{version}'
     current_version = get_version()
 
     if args.clean:
-        print('Cleaning {}'.format(version))
+        print(f'Cleaning {version}')
         git('checkout master')
         # git('tag -d {}'.format(version), error_ok=True)
-        git('branch -D {}'.format(branchname), error_ok=True)
-        git('branch -D {}'.format('web-page'), error_ok=True)
+        git(f'branch -D {branchname}', error_ok=True)
+        # git('branch -D {}'.format('web-page'), error_ok=True)
         return
 
-    print('New release: {}'.format(version))
+    print(f'New release: {version}')
 
     txt = git('status')
     branch = re.match(r'On branch (\S+)', txt).group(1)
-    print('Creating new release from branch {}'.format(repr(branch)))
-    git('checkout -b {}'.format(branchname))
 
-    def update_version(version):
-        print('Editing {}: version {}'.format(versionfile, version))
-        new_versionline = "__version__ = '{}'\n".format(version)
+    def match_and_edit_version(path, pattern, replacement):
+        print(f'Editing {path}: version {version}')
         lines = []
-        ok = False
-        with open(versionfile) as fd:
+        matches = 0
+
+        with open(path) as fd:
             for line in fd:
-                if line.startswith('__version__'):
-                    ok = True
-                    line = new_versionline
+                if line.startswith(pattern):
+                    line = replacement.rstrip() + '\n'
+                    matches += 1
                 lines.append(line)
-        assert ok
-        with open(versionfile, 'w') as fd:
-            for line in lines:
-                fd.write(line)
 
-    update_version(version)
+        assert matches == 1, 'Should only match one line!'
+        path.write_text(''.join(lines))
 
-    releasenotes = 'doc/releasenotes.rst'
+    match_and_edit_version(
+        versionfile,
+        pattern='__version__ = ',
+        replacement=f"__version__ = '{version}'")
+
+    match_and_edit_version(
+        pyproject,
+        pattern='version = ',
+        replacement=f"version = '{version}'")
+
+    releasenotes = ase_toplevel / 'doc/releasenotes.rst'
 
     searchtxt = re.escape("""\
 Git master branch
@@ -137,12 +143,12 @@ Git master branch
 """
 
     date = strftime('%d %B %Y').lstrip('0')
-    header = 'Version {}'.format(version)
+    header = f'Version {version}'
     underline = '=' * len(header)
     replacetxt = replacetxt.format(header=header, version=version,
                                    underline=underline, date=date)
 
-    print('Editing {}'.format(releasenotes))
+    print(f'Editing {releasenotes}')
     with open(releasenotes) as fd:
         txt = fd.read()
     txt, n = re.subn(searchtxt, replacetxt, txt, re.MULTILINE)
@@ -165,9 +171,9 @@ News
 
     replacetxt = replacetxt.format(version=version, date=date)
 
-    frontpage = 'doc/index.rst'
+    frontpage = ase_toplevel / 'doc/index.rst'
 
-    print('Editing {}'.format(frontpage))
+    print(f'Editing {frontpage}')
     with open(frontpage) as fd:
         txt = fd.read()
     txt, n = re.subn(searchtxt, replacetxt, txt)
@@ -175,25 +181,30 @@ News
     with open(frontpage, 'w') as fd:
         fd.write(txt)
 
-    installdoc = 'doc/install.rst'
-    print('Editing {}'.format(installdoc))
+    installdoc = ase_toplevel / 'doc/install.rst'
+    print(f'Editing {installdoc}')
 
     with open(installdoc) as fd:
         txt = fd.read()
 
     txt, nsub = re.subn(r'ase-\d+\.\d+\.\d+',
-                        'ase-{}'.format(version), txt)
+                        f'ase-{version}', txt)
     assert nsub > 0
     txt, nsub = re.subn(r'git clone -b \d+\.\d+\.\d+',
-                        'git clone -b {}'.format(version), txt)
+                        f'git clone -b {version}', txt)
     assert nsub == 1
 
     with open(installdoc, 'w') as fd:
         fd.write(txt)
 
-    git('add {}'.format(' '.join([versionfile, installdoc,
-                                  frontpage, releasenotes])))
-    git('commit -m "ASE version {}"'.format(version))
+    print(f'Creating new release from branch {branch!r}')
+    git(f'checkout -b {branchname}')
+
+    edited_paths = [versionfile, installdoc, pyproject,
+                    frontpage, releasenotes]
+
+    git('add {}'.format(' '.join(str(path) for path in edited_paths)))
+    git(f'commit -m "ASE version {version}"')
     # git('tag -s {0} -m "ase-{0}"'.format(version))
 
     buildpath = Path('build')
@@ -204,9 +215,11 @@ News
         shutil.rmtree('build')
     else:
         print('No stale build directory found; proceeding')
-    py('setup.py sdist > setup_sdist.log')
-    py('setup.py bdist_wheel > setup_bdist_wheel3.log')
-    bash('gpg --armor --yes --detach-sign dist/ase-{}.tar.gz'.format(version))
+
+    py('-m build')
+    # py('setup.py sdist > setup_sdist.log')
+    # py('setup.py bdist_wheel > setup_bdist_wheel3.log')
+    # bash(f'gpg --armor --yes --detach-sign dist/ase-{version}.tar.gz')
 
     print()
     print('Automatic steps done.')
@@ -218,9 +231,9 @@ News
     print()
     print('Remaining steps')
     print('===============')
-    print('git show {}  # Inspect!'.format(version))
+    print(f'git show {version}  # Inspect!')
     print('git checkout master')
-    print('git merge {}'.format(branchname))
+    print(f'git merge {branchname}')
     print('twine upload '
           'dist/ase-{v}.tar.gz '
           'dist/ase-{v}-py3-none-any.whl '
@@ -229,4 +242,8 @@ News
 
 
 if __name__ == '__main__':
+    assert versionfile.name == '__init__.py'
+    assert ase_toplevel == Path.cwd()
+    os.environ['LANGUAGE'] = 'C'
+
     main()

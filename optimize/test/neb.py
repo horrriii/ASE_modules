@@ -1,8 +1,8 @@
-from ase.optimize import QuasiNewton
-from ase.constraints import FixAtoms
+from ase.build import add_adsorbate, fcc100
 from ase.calculators.emt import EMT
-from ase.neb import NEB
-from ase.build import fcc100, add_adsorbate
+from ase.constraints import FixAtoms
+from ase.mep import NEB
+from ase.optimize import QuasiNewton
 
 
 def main():
@@ -34,7 +34,7 @@ def main():
     constraint = FixAtoms(mask=[atom.tag > 1 for atom in initial])
 
     images = [initial]
-    for i in range(3):
+    for _ in range(3):
         image = initial.copy()
         image.set_constraint(constraint)
         images.append(image)

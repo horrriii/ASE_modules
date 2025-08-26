@@ -4,12 +4,11 @@ import pytest
 from ase import Atoms
 
 
-def array_almost_equal(a1, a2, tol=np.finfo(type(1.0)).eps):
+def array_almost_equal(a1, a2, tol=np.finfo(float).eps):
     return (np.abs(a1 - a2) < tol).all()
 
 
 def test_atoms():
-    from ase import Atoms
     print(Atoms())
     print(Atoms('H2O'))
     # ...
@@ -52,6 +51,22 @@ def test_get_com(zlength):
     scaledref = np.array((0.5, 0.23823622, 0.))
     assert array_almost_equal(a.get_center_of_mass(scaled=True),
                               scaledref, tol=1e-8)
+
+
+@pytest.mark.parametrize('indices', [[0, 1], slice(0, 2), "0:2"])
+def test_get_com_indices(indices):
+    """Test get_center_of_mass(indices=...)"""
+    positions = [
+        [-0.3, 0.0, +0.3],
+        [-0.3, 0.0, -0.3],
+        [+0.3, 0.0, +0.3],
+        [+0.3, 0.0, -0.3],
+    ]
+    atoms = Atoms('HHHH', positions=positions)
+    np.testing.assert_almost_equal(
+        atoms.get_center_of_mass(indices=indices),
+        [-0.3, 0.0, 0.0],
+    )
 
 
 @pytest.mark.parametrize('scaled', [True, False])

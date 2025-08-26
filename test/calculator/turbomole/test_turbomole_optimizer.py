@@ -1,17 +1,17 @@
 # type: ignore
-import pytest
 import numpy as np
-from ase.calculators.turbomole import TurbomoleOptimizer
-from ase.calculators.turbomole import Turbomole
+import pytest
+
 from ase.build import molecule
+from ase.calculators.turbomole import Turbomole, TurbomoleOptimizer
 
 
-@pytest.fixture
+@pytest.fixture()
 def atoms():
     return molecule('H2O')
 
 
-@pytest.fixture
+@pytest.fixture()
 def calc():
     params = {
         'title': 'water',
@@ -25,13 +25,13 @@ def calc():
     return Turbomole(**params)
 
 
-def test_turbomole_optimizer_class(atoms, calc):
+def test_turbomole_optimizer_class(atoms, calc, turbomole_factory):
     optimizer = TurbomoleOptimizer(atoms, calc)
     optimizer.run(steps=1)
     assert isinstance(optimizer.todict(), dict)
 
 
-def test_turbomole_optimizer(atoms, calc):
+def test_turbomole_optimizer(atoms, calc, turbomole_factory):
     optimizer = calc.get_optimizer(atoms)
     optimizer.run(fmax=0.01, steps=5)
     assert np.linalg.norm(calc.get_forces(atoms)) < 0.01

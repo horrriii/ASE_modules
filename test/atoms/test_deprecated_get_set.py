@@ -1,10 +1,12 @@
 import pytest
+
 from ase.build import molecule
 from ase.calculators.emt import EMT
+
 # Careful testing since these deprecated functions will otherwise be untested.
 
 
-@pytest.fixture
+@pytest.fixture()
 def atoms():
     return molecule('H2O')
 

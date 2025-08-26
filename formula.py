@@ -6,12 +6,12 @@ from typing import Dict, List, Sequence, Tuple, Union
 from ase.data import atomic_numbers, chemical_symbols
 
 # For type hints (A, A2, A+B):
-Tree = Union[str, Tuple['Tree', int], List['Tree']]  # type: ignore
+Tree = Union[str, Tuple['Tree', int], List['Tree']]
 
 
 class Formula:
     def __init__(self,
-                 formula: str = '',
+                 formula: Union[str, 'Formula'] = '',
                  *,
                  strict: bool = False,
                  format: str = '',
@@ -52,13 +52,20 @@ class Formula:
         ValueError
             on malformed formula
         """
+
+        # Be sure that Formula(x) works the same whether x is string or Formula
+        assert isinstance(formula, (str, Formula))
+        formula = str(formula)
+
         if format:
             assert _tree is None and _count is None
             if format not in {'hill', 'metal', 'abc', 'reduce', 'ab2', 'a2b',
                               'periodic'}:
                 raise ValueError(f'Illegal format: {format}')
             formula = Formula(formula).format(format)
+
         self._formula = formula
+
         self._tree = _tree or parse(formula)
         self._count = _count or count_tree(self._tree)
         if strict:
@@ -160,10 +167,7 @@ class Formula:
 
         if fmt == 'hill':
             count = self.count()
-            count2 = {}
-            for symb in 'CH':
-                if symb in count:
-                    count2[symb] = count.pop(symb)
+            count2 = {symb: count.pop(symb) for symb in 'CH' if symb in count}
             for symb, n in sorted(count.items()):
                 count2[symb] = n
             return dict2str(count2)
@@ -232,7 +236,7 @@ class Formula:
         dct2 = {}
         for symb, n in dct.items():
             if not (isinstance(symb, str) and isinstance(n, int) and n >= 0):
-                raise ValueError('Bad dictionary: {dct}'.format(dct=dct))
+                raise ValueError(f'Bad dictionary: {dct}')
             if n > 0:  # filter out n=0 symbols
                 dct2[symb] = n
         return Formula(dict2str(dct2),
@@ -243,7 +247,7 @@ class Formula:
     def from_list(symbols: Sequence[str]) -> 'Formula':
         """Convert list of chemical symbols to Formula."""
         return Formula(''.join(symbols),
-                       _tree=[(symbols[:], 1)])
+                       _tree=[(symbols[:], 1)])  # type: ignore[list-item]
 
     def __len__(self) -> int:
         """Number of atoms."""
@@ -347,7 +351,10 @@ class Formula:
     def __rfloordiv__(self, other):
         return Formula(other) // self
 
-    def __iter__(self, tree=None):
+    def __iter__(self):
+        return self._tree_iter()
+
+    def _tree_iter(self, tree=None):
         if tree is None:
             tree = self._tree
         if isinstance(tree, str):
@@ -355,16 +362,16 @@ class Formula:
         elif isinstance(tree, tuple):
             tree, N = tree
             for _ in range(N):
-                yield from self.__iter__(tree)
+                yield from self._tree_iter(tree)
         else:
             for tree in tree:
-                yield from self.__iter__(tree)
+                yield from self._tree_iter(tree)
 
     def __str__(self):
         return self._formula
 
     def __repr__(self):
-        return 'Formula({!r})'.format(self._formula)
+        return f'Formula({self._formula!r})'
 
     def _reduce(self):
         N = 0
@@ -411,7 +418,7 @@ def parse(f: str) -> Tree:
     for part in parts:
         n, f = strip_number(part)
         result.append((parse2(f), n))
-    return result
+    return result  # type: ignore[return-value]
 
 
 def parse2(f: str) -> Tree:
@@ -505,7 +512,7 @@ non_metals = ['H', 'He', 'B', 'C', 'N', 'O', 'F', 'Ne',
               'Po', 'At', 'Rn']
 
 
-@lru_cache()
+@lru_cache
 def periodic_table_order() -> Dict[str, int]:
     """Create dict for sorting after period first then row."""
     return {symbol: n for n, symbol in enumerate(chemical_symbols[87:] +

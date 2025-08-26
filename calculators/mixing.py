@@ -1,40 +1,55 @@
-from ase.calculators.calculator import BaseCalculator, all_changes
-from ase.calculators.calculator import (PropertyNotImplementedError,
-                                        CalculatorSetupError)
+from ase.calculators.calculator import (BaseCalculator, CalculatorSetupError,
+                                        PropertyNotImplementedError,
+                                        all_changes)
+from ase.stress import full_3x3_to_voigt_6_stress
 
 
 class Mixer:
     def __init__(self, calcs, weights):
         self.check_input(calcs, weights)
-        common_properties = set.intersection(*(set(calc.implemented_properties)
-                                               for calc in calcs))
+        common_properties = set.intersection(
+            *(set(calc.implemented_properties) for calc in calcs)
+        )
         self.implemented_properties = list(common_properties)
         if not self.implemented_properties:
-            raise PropertyNotImplementedError('The provided Calculators have no'
-                                              ' properties in common!')
+            raise PropertyNotImplementedError(
+                "The provided Calculators have"
+                " no properties in common!"
+            )
         self.calcs = calcs
         self.weights = weights
 
     @staticmethod
     def check_input(calcs, weights):
         if len(calcs) == 0:
-            raise CalculatorSetupError('Please provide a list of Calculators')
-        for calc in calcs:
-            if not isinstance(calc, BaseCalculator):
-                raise CalculatorSetupError('All Calculators should be inherited'
-                                           ' form the BaseCalculator class')
+            raise CalculatorSetupError("Please provide a list of Calculators")
         if len(weights) != len(calcs):
-            raise ValueError('The length of the weights must be the same as the'
-                             ' number of Calculators!')
+            raise ValueError(
+                "The length of the weights must be the same as"
+                " the number of Calculators!"
+            )
 
     def get_properties(self, properties, atoms):
         results = {}
 
         def get_property(prop):
-            contributs = [calc.get_property(prop, atoms) for calc in self.calcs]
-            results[f'{prop}_contributions'] = contributs
-            results[prop] = sum(weight * value for weight, value
-                                in zip(self.weights, contributs))
+            contribs = [calc.get_property(prop, atoms) for calc in self.calcs]
+            # ensure that the contribution shapes are the same for stress prop
+            if prop == "stress":
+                shapes = [contrib.shape for contrib in contribs]
+                if not all(shape == shapes[0] for shape in shapes):
+                    if prop == "stress":
+                        contribs = self.make_stress_voigt(contribs)
+                    else:
+                        raise ValueError(
+                            f"The shapes of the property {prop}"
+                            " are not the same from all"
+                            " calculators"
+                        )
+            results[f"{prop}_contributions"] = contribs
+            results[prop] = sum(
+                weight * value for weight, value in zip(self.weights, contribs)
+            )
 
         for prop in properties:  # get requested properties
             get_property(prop)
@@ -43,10 +58,26 @@ class Mixer:
                 get_property(prop)
         return results
 
+    @staticmethod
+    def make_stress_voigt(stresses):
+        new_contribs = []
+        for contrib in stresses:
+            if contrib.shape == (6,):
+                new_contribs.append(contrib)
+            elif contrib.shape == (3, 3):
+                new_cont = full_3x3_to_voigt_6_stress(contrib)
+                new_contribs.append(new_cont)
+            else:
+                raise ValueError(
+                    "The shapes of the stress"
+                    " property are not the same"
+                    " from all calculators"
+                )
+        return new_contribs
+
 
 class LinearCombinationCalculator(BaseCalculator):
-    """LinearCombinationCalculator for weighted summation of multiple calculators.
-    """
+    """Weighted summation of multiple calculators."""
 
     def __init__(self, calcs, weights):
         """Implementation of sum of calculators.
@@ -69,9 +100,10 @@ class LinearCombinationCalculator(BaseCalculator):
         self.results = self.mixer.get_properties(properties, atoms)
 
     def __str__(self):
-        calculators = ', '.join(
-            calc.__class__.__name__ for calc in self.mixer.calcs)
-        return '{}({})'.format(self.__class__.__name__, calculators)
+        calculators = ", ".join(
+            calc.__class__.__name__ for calc in self.mixer.calcs
+        )
+        return f"{self.__class__.__name__}({calculators})"
 
 
 class MixedCalculator(LinearCombinationCalculator):
@@ -100,12 +132,13 @@ class MixedCalculator(LinearCombinationCalculator):
         self.mixer.weights[1] = w2
 
     def get_energy_contributions(self, atoms=None):
-        """ Return the potential energy from calc1 and calc2 respectively """
+        """Return the potential energy from calc1 and calc2 respectively"""
         self.calculate(
-            properties=['energy'],
+            properties=["energy"],
             atoms=atoms,
-            system_changes=all_changes)
-        return self.results['energy_contributions']
+            system_changes=all_changes
+        )
+        return self.results["energy_contributions"]
 
 
 class SumCalculator(LinearCombinationCalculator):
@@ -127,7 +160,7 @@ class SumCalculator(LinearCombinationCalculator):
             List of an arbitrary number of :mod:`ase.calculators` objects.
         """
 
-        weights = [1.] * len(calcs)
+        weights = [1.0] * len(calcs)
         super().__init__(calcs, weights)
 
 
@@ -145,7 +178,8 @@ class AverageCalculator(LinearCombinationCalculator):
 
         if n == 0:
             raise CalculatorSetupError(
-                'The value of the calcs must be a list of Calculators')
+                "The value of the calcs must be a list of Calculators"
+            )
 
         weights = [1 / n] * n
         super().__init__(calcs, weights)

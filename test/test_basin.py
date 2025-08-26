@@ -1,13 +1,15 @@
 import numpy as np
 import pytest
+
 from ase import Atoms, io
 from ase.calculators.lj import LennardJones
-from ase.optimize.basin import BasinHopping
 from ase.io import read
+from ase.optimize.basin import BasinHopping
 from ase.units import kB
 
 
-@pytest.mark.slow
+@pytest.mark.optimize()
+@pytest.mark.slow()
 def test_basin(testdir):
     # Global minima from
     # Wales and Doye, J. Phys. Chem. A, vol 101 (1997) 5111-5116

@@ -2,10 +2,10 @@ from typing import List, Optional
 
 import numpy as np
 
-from ase.data import atomic_numbers as ref_atomic_numbers
-from ase.spacegroup import Spacegroup
 from ase.cluster.base import ClusterBase
 from ase.cluster.cluster import Cluster
+from ase.data import atomic_numbers as ref_atomic_numbers
+from ase.spacegroup import Spacegroup
 
 
 class ClusterFactory(ClusterBase):
@@ -143,8 +143,8 @@ class ClusterFactory(ClusterBase):
         else:
             offset = np.array(center)
             if (offset > 1.0).any() or (offset < 0.0).any():
-                raise ValueError("Center offset must lie within the lattice unit \
-                                  cell.")
+                raise ValueError(
+                    "Center offset must lie within the lattice unit cell.")
 
         max = np.ones(3)
         min = -np.ones(3)

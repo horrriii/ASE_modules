@@ -1,21 +1,21 @@
 """
 Module for parsing OUTCAR files.
 """
-from abc import ABC, abstractmethod
-from typing import (Dict, Any, Sequence, TextIO, Iterator, Optional, Union,
-                    List)
 import re
-from warnings import warn
+from abc import ABC, abstractmethod
 from pathlib import Path, PurePath
+from typing import Any, Dict, Iterator, List, Optional, Sequence, TextIO, Union
+from warnings import warn
 
 import numpy as np
+
 import ase
 from ase import Atoms
+from ase.calculators.singlepoint import (SinglePointDFTCalculator,
+                                         SinglePointKPoint)
 from ase.data import atomic_numbers
 from ase.io import ParseError, read
 from ase.io.utils import ImageChunk
-from ase.calculators.singlepoint import (SinglePointDFTCalculator,
-                                         SinglePointKPoint)
 
 # Denotes end of Ionic step for OUTCAR reading
 _OUTCAR_SCF_DELIM = 'FREE ENERGIE OF THE ION-ELECTRON SYSTEM'
@@ -85,7 +85,7 @@ def convert_vasp_outcar_stress(stress: Sequence):
     shape = stress_arr.shape
     if shape != (6, ):
         raise ValueError(
-            'Stress has the wrong shape. Expected (6,), got {}'.format(shape))
+            f'Stress has the wrong shape. Expected (6,), got {shape}')
     stress_arr = stress_arr[[0, 1, 2, 4, 5, 3]] * 1e-1 * ase.units.GPa
     return stress_arr
 
@@ -95,7 +95,9 @@ def read_constraints_from_file(directory):
     constraint = None
     for filename in ('CONTCAR', 'POSCAR'):
         if (directory / filename).is_file():
-            constraint = read(directory / filename, format='vasp').constraints
+            constraint = read(directory / filename,
+                              format='vasp',
+                              parallel=False).constraints
             break
     return constraint
 
@@ -394,36 +396,49 @@ class Magmom(VaspChunkPropertyParser):
         idx = parts.index('magnetization') + 1
         magmom_lst = parts[idx:]
         if len(magmom_lst) != 1:
-            warn(
-                'Non-collinear spin is not yet implemented. '
-                'Setting magmom to x value.')
-        magmom = float(magmom_lst[0])
-        # Use these lines when non-collinear spin is supported!
-        # Remember to check that format fits!
-        # else:
-        #     # Non-collinear spin
-        #     # Make a (3,) dim array
-        #     magmom = np.array(list(map(float, magmom)))
+            magmom = np.array(list(map(float, magmom_lst)))
+        else:
+            magmom = float(magmom_lst[0])
         return {'magmom': magmom}
 
 
-class Magmoms(SimpleVaspChunkParser):
-    """Get the x-component of the magnitization.
-    This is just the magmoms in the collinear case.
-
-    non-collinear spin is (currently) not supported"""
-    LINE_DELIMITER = 'magnetization (x)'
+class Magmoms(VaspChunkPropertyParser):
+    def has_property(self, cursor: _CURSOR, lines: _CHUNK) -> bool:
+        line = lines[cursor]
+        if 'magnetization (x)' in line:
+            natoms = self.get_from_header('natoms')
+            self.non_collinear = False
+            if cursor + natoms + 9 < len(lines):
+                line_y = self.get_line(cursor + natoms + 9, lines)
+                if 'magnetization (y)' in line_y:
+                    self.non_collinear = True
+            return True
+        return False
 
     def parse(self, cursor: _CURSOR, lines: _CHUNK) -> _RESULT:
-        # Magnetization for collinear
+
         natoms = self.get_from_header('natoms')
-        nskip = 4  # Skip some lines
-        magmoms = np.zeros(natoms)
-        for i in range(natoms):
-            line = self.get_line(cursor + i + nskip, lines)
-            magmoms[i] = float(line.split()[-1])
-        # Once we support non-collinear spin,
-        # search for magnetization (y) and magnetization (z) as well.
+        if self.non_collinear:
+            magmoms = np.zeros((natoms, 3))
+            nskip = 4  # Skip some lines
+            for i in range(natoms):
+                line = self.get_line(cursor + i + nskip, lines)
+                magmoms[i, 0] = float(line.split()[-1])
+            nskip = natoms + 13  # Skip some lines
+            for i in range(natoms):
+                line = self.get_line(cursor + i + nskip, lines)
+                magmoms[i, 1] = float(line.split()[-1])
+            nskip = 2 * natoms + 22  # Skip some lines
+            for i in range(natoms):
+                line = self.get_line(cursor + i + nskip, lines)
+                magmoms[i, 2] = float(line.split()[-1])
+        else:
+            magmoms = np.zeros(natoms)
+            nskip = 4  # Skip some lines
+            for i in range(natoms):
+                line = self.get_line(cursor + i + nskip, lines)
+                magmoms[i] = float(line.split()[-1])
+
         return {'magmoms': magmoms}
 
 
@@ -543,7 +558,7 @@ class DefaultParsersContainer:
     def make_parsers(self):
         """Return a copy of the internally stored parsers.
         Parsers are created upon request."""
-        return list(parser() for parser in self.parsers_dct.values())
+        return [parser() for parser in self.parsers_dct.values()]
 
     def remove_parser(self, name: str):
         """Remove a parser based on the name.

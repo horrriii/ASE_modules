@@ -4,16 +4,18 @@ import re
 import time
 import warnings
 from pathlib import Path
-from typing import Union
+from typing import Any, Dict, List, Union
 
 import numpy as np
+
 from ase import Atom, Atoms
 from ase.calculators.calculator import kpts2mp
 from ase.calculators.singlepoint import SinglePointDFTCalculator
 from ase.constraints import FixAtoms, FixCartesian
 from ase.data import atomic_numbers
+from ase.io import ParseError
 from ase.units import Ang, fs
-from ase.utils import lazymethod, lazyproperty, reader, writer
+from ase.utils import deprecated, lazymethod, lazyproperty, reader, writer
 
 v_unit = Ang / (1000.0 * fs)
 
@@ -47,12 +49,9 @@ def read_aims(fd, apply_constraints=True):
 def parse_geometry_lines(lines, apply_constraints=True):
 
     from ase import Atoms
-    from ase.constraints import (
-        FixAtoms,
-        FixCartesian,
-        FixScaledParametricRelations,
-        FixCartesianParametricRelations,
-    )
+    from ase.constraints import (FixAtoms, FixCartesian,
+                                 FixCartesianParametricRelations,
+                                 FixScaledParametricRelations)
 
     atoms = Atoms()
 
@@ -219,7 +218,26 @@ def get_aims_header():
     return lines
 
 
+def _write_velocities_alias(args: List, kwargs: Dict[str, Any]) -> bool:
+    arg_position = 5
+    if len(args) > arg_position and args[arg_position]:
+        args[arg_position - 1] = True
+    elif kwargs.get("velocities", False):
+        if len(args) < arg_position:
+            kwargs["write_velocities"] = True
+        else:
+            args[arg_position - 1] = True
+    else:
+        return False
+    return True
+
+
 # Write aims geometry files
+@deprecated(
+    "Use of `velocities` is deprecated, please use `write_velocities`",
+    category=FutureWarning,
+    callback=_write_velocities_alias,
+)
 @writer
 def write_aims(
     fd,
@@ -258,9 +276,10 @@ def write_aims(
             A string to be added to the header of the file
         wrap: bool
             Wrap atom positions to cell before writing
-    """
 
-    from ase.constraints import FixAtoms, FixCartesian
+    .. deprecated:: 3.23.0
+        Use of ``velocities`` is deprecated, please use ``write_velocities``.
+    """
 
     if scaled and not np.all(atoms.pbc):
         raise ValueError(
@@ -286,9 +305,9 @@ def write_aims(
     if info_str is not None:
         fd.write("\n# Additional information:\n")
         if isinstance(info_str, list):
-            fd.write("\n".join(["#  {}".format(s) for s in info_str]))
+            fd.write("\n".join([f"#  {s}" for s in info_str]))
         else:
-            fd.write("# {}".format(info_str))
+            fd.write(f"# {info_str}")
         fd.write("\n")
 
     fd.write("#=======================================================\n")
@@ -298,16 +317,15 @@ def write_aims(
         for n, vector in enumerate(atoms.get_cell()):
             fd.write("lattice_vector ")
             for i in range(3):
-                fd.write("%16.16f " % vector[i])
+                fd.write(f"{vector[i]:16.16f} ")
             fd.write("\n")
-    fix_cart = np.zeros([len(atoms), 3])
 
-    if atoms.constraints:
-        for constr in atoms.constraints:
-            if isinstance(constr, FixAtoms):
-                fix_cart[constr.index] = [1, 1, 1]
-            elif isinstance(constr, FixCartesian):
-                fix_cart[constr.index] = -constr.mask.astype(int) + 1
+    fix_cart = np.zeros((len(atoms), 3), dtype=bool)
+    for constr in atoms.constraints:
+        if isinstance(constr, FixAtoms):
+            fix_cart[constr.index] = (True, True, True)
+        elif isinstance(constr, FixCartesian):
+            fix_cart[constr.index] = constr.mask
 
     if ghosts is None:
         ghosts = np.zeros(len(atoms))
@@ -327,10 +345,10 @@ def write_aims(
         fd.write(atomstring)
         if scaled:
             for pos in scaled_positions[i]:
-                fd.write("%16.16f " % pos)
+                fd.write(f"{pos:16.16f} ")
         else:
             for pos in atom.position:
-                fd.write("%16.16f " % pos)
+                fd.write(f"{pos:16.16f} ")
         fd.write(atom.symbol)
         fd.write("\n")
         # (1) all coords are constrained:
@@ -341,26 +359,15 @@ def write_aims(
             xyz = fix_cart[i]
             for n in range(3):
                 if xyz[n]:
-                    fd.write("    constrain_relaxation %s\n" % "xyz"[n])
+                    fd.write(f"    constrain_relaxation {'xyz'[n]}\n")
         if atom.charge:
-            fd.write("    initial_charge %16.6f\n" % atom.charge)
+            fd.write(f"    initial_charge {atom.charge:16.6f}\n")
         if atom.magmom:
-            fd.write("    initial_moment %16.6f\n" % atom.magmom)
-
-        # Write the velocities if this is wanted
-        if velocities:
-            warnings.warn(
-                '`velocities` is deprecated, please use `write_velocities`',
-                np.VisibleDeprecationWarning
-            )
-            write_velocities = True
+            fd.write(f"    initial_moment {atom.magmom:16.6f}\n")
 
         if write_velocities and atoms.get_velocities() is not None:
-            fd.write(
-                "    velocity {:.16f} {:.16f} {:.16f}\n".format(
-                    *atoms.get_velocities()[i] / v_unit
-                )
-            )
+            v = atoms.get_velocities()[i] / v_unit
+            fd.write(f"    velocity {v[0]:.16f} {v[1]:.16f} {v[2]:.16f}\n")
 
     if geo_constrain:
         for line in get_sym_block(atoms):
@@ -369,10 +376,8 @@ def write_aims(
 
 def get_sym_block(atoms):
     """Get symmetry block for Parametric constraints in atoms.constraints"""
-    from ase.constraints import (
-        FixScaledParametricRelations,
-        FixCartesianParametricRelations,
-    )
+    from ase.constraints import (FixCartesianParametricRelations,
+                                 FixScaledParametricRelations)
 
     # Initialize param/expressions lists
     atomic_sym_params = []
@@ -426,7 +431,7 @@ def get_sym_block(atoms):
         lv_sym_params = np.unique(lv_sym_params)
 
     if np.any(atomic_param_constr == ""):
-        raise IOError(
+        raise OSError(
             "FHI-aims input files require all atoms have defined parametric "
             "constraints"
         )
@@ -455,10 +460,10 @@ def get_sym_block(atoms):
         )
 
         for constr in lv_param_constr:
-            sym_block.append("symmetry_lv {:s}\n".format(constr))
+            sym_block.append(f"symmetry_lv {constr:s}\n")
 
         for constr in atomic_param_constr:
-            sym_block.append("symmetry_frac {:s}\n".format(constr))
+            sym_block.append(f"symmetry_frac {constr:s}\n")
     return sym_block
 
 
@@ -513,12 +518,12 @@ def write_control(fd, atoms, parameters, verbose_header=False):
     if verbose_header:
         fd.write("# \n# List of parameters used to initialize the calculator:")
         for p, v in parameters.items():
-            s = "#     {}:{}\n".format(p, v)
+            s = f"#     {p}:{v}\n"
             fd.write(s)
     fd.write(lim + "\n")
 
-    assert not ("kpts" in parameters and "k_grid" in parameters)
-    assert not ("smearing" in parameters and "occupation_type" in parameters)
+    assert "kpts" not in parameters or "k_grid" not in parameters
+    assert "smearing" not in parameters or "occupation_type" not in parameters
 
     for key, value in parameters.items():
         if key == "kpts":
@@ -534,7 +539,7 @@ def write_control(fd, atoms, parameters, verbose_header=False):
                     "k_offset",
                     tuple(dk),
                     "%f %f %f"))
-        elif key == "species_dir":
+        elif key in ("species_dir", "tier"):
             continue
         elif key == "plus_u":
             continue
@@ -581,7 +586,8 @@ def write_control(fd, atoms, parameters, verbose_header=False):
 
     # Get the species directory
     species_dir = get_species_directory
-    species_array = np.array(list(set(atoms.symbols)))
+    # dicts are ordered as of python 3.7
+    species_array = np.array(list(dict.fromkeys(atoms.symbols)))
     # Grab the tier specification from the parameters. THis may either
     # be None, meaning the default should be used for all species, or a
     # list of integers/None values giving a specific basis set size
@@ -704,7 +710,7 @@ def parse_species_path(species_array, tier_array, species_dir):
     for symbol, tier in zip(species_array, tier_array):
         path = species_dir / f"{atomic_numbers[symbol]:02}_{symbol}_default"
         # Open the species file:
-        with open(path, "r", encoding="utf8") as species_file_handle:
+        with open(path, encoding="utf8") as species_file_handle:
             # Read the species file into a string.
             species_file_str = species_file_handle.read()
             species_basis_dict[symbol] = manipulate_tiers(
@@ -798,7 +804,7 @@ class AimsOutChunk:
             The last time one of the keys appears in self.lines
         """
         for ll, line in enumerate(self.lines[line_start:][::-1]):
-            if any([key in line for key in keys]):
+            if any(key in line for key in keys):
                 return len(self.lines) - ll - 1
 
         return LINE_NOT_FOUND
@@ -900,7 +906,7 @@ class AimsOutHeaderChunk(AimsOutChunk):
                 if keep:
                     fix_cart.append(FixCartesian(ind, xyz))
                 else:
-                    fix_cart[n].mask[xyz.index(1)] = 0
+                    fix_cart[n].mask[xyz.index(1)] = 1
         if len(fix) > 0:
             fix_cart.append(FixAtoms(indices=fix))
 
@@ -984,7 +990,7 @@ class AimsOutHeaderChunk(AimsOutChunk):
             }
 
         k_points = np.zeros((n_kpts, 3))
-        k_point_weights = np.zeros((n_kpts))
+        k_point_weights = np.zeros(n_kpts)
         for kk, line in enumerate(self.lines[line_start + 1:line_end + 1]):
             k_points[kk] = [float(inp) for inp in line.split()[4:7]]
             k_point_weights[kk] = float(line.split()[-1])
@@ -1130,8 +1136,12 @@ class AimsOutCalcChunk(AimsOutChunk):
         line_start += 1
 
         line_end = self.reverse_search_for(
-            ['Writing the current geometry to file "geometry.in.next_step"'],
-            line_start)
+            [
+                'Next atomic structure:',
+                'Writing the current geometry to file "geometry.in.next_step"'
+            ],
+            line_start
+        )
         if line_end == LINE_NOT_FOUND:
             line_end = len(self.lines)
 
@@ -1144,7 +1154,7 @@ class AimsOutCalcChunk(AimsOutChunk):
             elif "atom   " in line:
                 line_split = line.split()
                 atoms.append(Atom(line_split[4], tuple(
-                    [float(inp) for inp in line_split[1:4]])))
+                    float(inp) for inp in line_split[1:4])))
             elif "velocity   " in line:
                 velocities.append([float(inp) for inp in line.split()[1:]])
 
@@ -1169,7 +1179,7 @@ class AimsOutCalcChunk(AimsOutChunk):
         """Parse the forces from the aims.out file"""
         line_start = self.reverse_search_for(["Total atomic forces"])
         if line_start == LINE_NOT_FOUND:
-            return
+            return None
 
         line_start += 1
 
@@ -1191,7 +1201,7 @@ class AimsOutCalcChunk(AimsOutChunk):
         line_start += 3
         stresses = []
         for line in self.lines[line_start:line_start + self.n_atoms]:
-            xx, yy, zz, xy, xz, yz = [float(d) for d in line.split()[2:8]]
+            xx, yy, zz, xy, xz, yz = (float(d) for d in line.split()[2:8])
             stresses.append([xx, yy, zz, yz, xz, xy])
 
         return np.array(stresses)
@@ -1202,10 +1212,14 @@ class AimsOutCalcChunk(AimsOutChunk):
         from ase.stress import full_3x3_to_voigt_6_stress
 
         line_start = self.reverse_search_for(
-            ["Analytical stress tensor - Symmetrized"]
+            [
+                "Analytical stress tensor - Symmetrized",
+                "Numerical stress tensor",
+            ]
+
         )  # Offest to relevant lines
         if line_start == LINE_NOT_FOUND:
-            return
+            return None
 
         stress = [
             [float(inp) for inp in line.split()[2:5]]
@@ -1238,13 +1252,35 @@ class AimsOutCalcChunk(AimsOutChunk):
 
     @lazyproperty
     def dipole(self):
-        """Parse the electric dipole moment from the aims.out file file."""
+        """Parse the electric dipole moment from the aims.out file."""
         line_start = self.reverse_search_for(["Total dipole moment [eAng]"])
         if line_start == LINE_NOT_FOUND:
-            return
+            return None
 
         line = self.lines[line_start]
         return np.array([float(inp) for inp in line.split()[6:9]])
+
+    @lazyproperty
+    def dielectric_tensor(self):
+        """Parse the dielectric tensor from the aims.out file"""
+        line_start = self.reverse_search_for(["PARSE DFPT_dielectric_tensor"])
+        if line_start == LINE_NOT_FOUND:
+            return None
+
+        # we should find the tensor in the next three lines:
+        lines = self.lines[line_start + 1:line_start + 4]
+
+        # make ndarray and return
+        return np.array([np.fromstring(line, sep=' ') for line in lines])
+
+    @lazyproperty
+    def polarization(self):
+        """ Parse the polarization vector from the aims.out file"""
+        line_start = self.reverse_search_for(["| Cartesian Polarization"])
+        if line_start == LINE_NOT_FOUND:
+            return None
+        line = self.lines[line_start]
+        return np.array([float(s) for s in line.split()[-3:]])
 
     @lazymethod
     def _parse_hirshfeld(self):
@@ -1317,6 +1353,7 @@ class AimsOutCalcChunk(AimsOutChunk):
                 "What follows are estimated values for band gap, "
                 "HOMO, LUMO, etc.",
                 "Current spin moment of the entire structure :",
+                "Highest occupied state (VBM)"
             ],
             line_start,
         )
@@ -1341,10 +1378,12 @@ class AimsOutCalcChunk(AimsOutChunk):
         )
         kpt_def = self.search_for_all("K-point: ", line_start, line_end)
 
-        if self.n_k_points:
+        if len(kpt_def) > 0:
             kpt_inds = [int(self.lines[ll].split()[1]) - 1 for ll in kpt_def]
-        else:
+        elif (self.n_k_points is None) or (self.n_k_points == 1):
             kpt_inds = [0]
+        else:
+            raise ParseError("Cannot find k-point definitions")
 
         assert len(kpt_inds) == len(occupation_block_start)
         spins = [0] * len(occupation_block_start)
@@ -1388,6 +1427,8 @@ outputs to atoms.info"""
             stresses=self.stresses,
             magmom=self.magmom,
             dipole=self.dipole,
+            dielectric_tensor=self.dielectric_tensor,
+            polarization=self.polarization,
         )
         return atoms
 
@@ -1410,6 +1451,8 @@ outputs to atoms.info"""
             "hirshfeld_atomic_dipoles": self.hirshfeld_atomic_dipoles,
             "eigenvalues": self.eigenvalues,
             "occupancies": self.occupancies,
+            "dielectric_tensor": self.dielectric_tensor,
+            "polarization": self.polarization,
         }
 
         return {
@@ -1543,12 +1586,17 @@ def get_header_chunk(fd):
     while (
         "Convergence:    q app. |  density  | eigen (eV) | Etot (eV)"
             not in line
+            and "Convergence:    q app. |  density,  spin     | eigen (eV) |"
+            not in line
             and "Begin self-consistency iteration #" not in line
     ):
         try:
             line = next(fd).strip()  # Raises StopIteration on empty file
         except StopIteration:
-            return
+            raise ParseError(
+                "No SCF steps present, calculation failed at setup."
+            )
+
         header.append(line)
     return AimsOutHeaderChunk(header)
 
@@ -1581,11 +1629,20 @@ def get_aims_out_chunks(fd, header_chunk):
         lines = []
         while chunk_end_line not in line or ignore_chunk_end_line:
             lines.append(line)
-            # If SCF cycle not converged, don't end chunk on next
-            # Re-initialization
-            pattern = ("Self-consistency cycle not yet converged - "
-                       "restarting mixer to attempt better convergence.")
-            if pattern in line:
+            # If SCF cycle not converged or numerical stresses are requested,
+            # don't end chunk on next Re-initialization
+            patterns = [
+                (
+                    "Self-consistency cycle not yet converged -"
+                    " restarting mixer to attempt better convergence."
+                ),
+                (
+                    "Components of the stress tensor (for mathematical "
+                    "background see comments in numerical_stress.f90)."
+                ),
+                "Calculation of numerical stress completed",
+            ]
+            if any(pattern in line for pattern in patterns):
                 ignore_chunk_end_line = True
             elif "Begin self-consistency loop: Re-initialization" in line:
                 ignore_chunk_end_line = False
@@ -1614,7 +1671,7 @@ def check_convergence(chunks, non_convergence_ok=False):
         True if the calculation is converged
     """
     if not non_convergence_ok and not chunks[-1].converged:
-        raise ValueError("The calculation did not complete successfully")
+        raise ParseError("The calculation did not complete successfully")
     return True
 
 
@@ -1626,7 +1683,7 @@ def read_aims_output(fd, index=-1, non_convergence_ok=False):
     chunks = list(get_aims_out_chunks(fd, header_chunk))
     check_convergence(chunks, non_convergence_ok)
 
-    # Relaxations have an additional fotter chunk due to how it is split
+    # Relaxations have an additional footer chunk due to how it is split
     if header_chunk.is_relaxation:
         images = [chunk.atoms for chunk in chunks[:-1]]
     else:
@@ -1637,7 +1694,7 @@ def read_aims_output(fd, index=-1, non_convergence_ok=False):
 @reader
 def read_aims_results(fd, index=-1, non_convergence_ok=False):
     """Import FHI-aims output files and summarize all relevant information
-into a dictionary"""
+    into a dictionary"""
     header_chunk = get_header_chunk(fd)
     chunks = list(get_aims_out_chunks(fd, header_chunk))
     check_convergence(chunks, non_convergence_ok)

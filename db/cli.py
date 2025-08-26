@@ -7,7 +7,7 @@ from typing import Iterable, Iterator
 
 import ase.io
 from ase.db import connect
-from ase.db.core import convert_str_to_int_float_or_str
+from ase.db.core import convert_str_to_int_float_bool_or_str
 from ase.db.row import row2dct
 from ase.db.table import Table, all_columns
 from ase.utils import plural
@@ -40,7 +40,8 @@ def main(args):
     if args.add_key_value_pairs:
         for pair in args.add_key_value_pairs.split(','):
             key, value = pair.split('=')
-            add_key_value_pairs[key] = convert_str_to_int_float_or_str(value)
+            add_key_value_pairs[key] = \
+                convert_str_to_int_float_bool_or_str(value)
 
     if args.delete_keys:
         delete_keys = args.delete_keys.split(',')
@@ -83,7 +84,7 @@ def main(args):
             else:
                 print('{:{}} {}'
                       .format(key + ':', n,
-                              ', '.join('{}({})'.format(v, n)
+                              ', '.join(f'{v}({n})'
                                         for v, n in vals.items())))
         return
 
@@ -99,7 +100,7 @@ def main(args):
 
     if args.count:
         n = db.count(query)
-        print('%s' % plural(n, 'row'))
+        print(f'{plural(n, "row")}')
         return
 
     if args.insert_into:
@@ -143,7 +144,7 @@ def main(args):
         out('Added %s (%s updated)' %
             (plural(nkvp, 'key-value pair'),
              plural(len(add_key_value_pairs) * nrows - nkvp, 'pair')))
-        out('Inserted %s' % plural(nrows, 'row'))
+        out(f'Inserted {plural(nrows, "row")}')
         return
 
     if args.limit == -1:
@@ -185,11 +186,11 @@ def main(args):
     if args.delete:
         ids = [row['id'] for row in db.select(query, include_data=False)]
         if ids and not args.yes:
-            msg = 'Delete %s? (yes/No): ' % plural(len(ids), 'row')
+            msg = f'Delete {plural(len(ids), "row")}? (yes/No): '
             if input(msg).lower() != 'yes':
                 return
         db.delete(ids)
-        out('Deleted %s' % plural(len(ids), 'row'))
+        out(f'Deleted {plural(len(ids), "row")}')
         return
 
     if args.plot:
@@ -245,8 +246,7 @@ def main(args):
             return
         check_jsmol()
         import ase.db.app as app
-        app.add_project(db)
-        app.app.run(host='0.0.0.0', debug=True)
+        app.DBApp().run_db(db)
         return
 
     columns = list(all_columns)
@@ -282,7 +282,7 @@ def main(args):
 
 
 def row2str(row) -> str:
-    t = row2dct(row)
+    t = row2dct(row, key_descriptions={})
     S = [t['formula'] + ':',
          'Unit cell in Ang:',
          'axis|periodic|          x|          y|          z|' +

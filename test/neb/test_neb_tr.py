@@ -2,11 +2,12 @@ import pytest
 
 from ase import Atoms
 from ase.calculators.lj import LennardJones
-from ase.neb import NEB, NEBTools, idpp_interpolate
-from ase.optimize import FIRE, BFGS
+from ase.mep import NEB, NEBTools, idpp_interpolate
+from ase.optimize import BFGS, FIRE
 
 
-@pytest.mark.slow
+@pytest.mark.optimize()
+@pytest.mark.slow()
 def test_neb_tr(testdir):
     nimages = 3
     fmax = 0.01
@@ -33,7 +34,7 @@ def test_neb_tr(testdir):
         images = [initial]
 
         # Set calculator
-        for i in range(nimages):
+        for _ in range(nimages):
             image = initial.copy()
             image.calc = LennardJones()
             images.append(image)

@@ -1,10 +1,13 @@
+from typing import Sequence
+
 import numpy as np
 
 from ase.calculators.calculator import Calculator
-from ase.data import atomic_numbers
-from ase.utils import IOContext
-from ase.geometry import get_distances
 from ase.cell import Cell
+from ase.data import atomic_numbers
+from ase.geometry import get_distances
+from ase.utils import IOContext
+from ase.parallel import world
 
 
 class SimpleQMMM(Calculator):
@@ -92,7 +95,7 @@ class EIQMMM(Calculator, IOContext):
     implemented_properties = ['energy', 'forces']
 
     def __init__(self, selection, qmcalc, mmcalc, interaction,
-                 vacuum=None, embedding=None, output=None):
+                 vacuum=None, embedding=None, output=None, comm=world):
         """EIQMMM object.
 
         The energy is calculated as::
@@ -135,7 +138,7 @@ class EIQMMM(Calculator, IOContext):
         self.mask = None
         self.center = None  # center of QM atoms in QM-box
 
-        self.output = self.openfile(output)
+        self.output = self.openfile(file=output, comm=comm)
 
         Calculator.__init__(self)
 
@@ -193,7 +196,7 @@ class EIQMMM(Calculator, IOContext):
         mmenergy = self.mmatoms.get_potential_energy()
         energy = ienergy + qmenergy + mmenergy
 
-        print('Energies: {0:12.3f} {1:+12.3f} {2:+12.3f} = {3:12.3f}'
+        print('Energies: {:12.3f} {:+12.3f} {:+12.3f} = {:12.3f}'
               .format(ienergy, qmenergy, mmenergy, energy), file=self.output)
 
         qmforces = self.qmatoms.get_forces()
@@ -228,7 +231,7 @@ class Embedding:
         self.parameters = parameters
 
     def __repr__(self):
-        return 'Embedding(molecule_size={0})'.format(self.molecule_size)
+        return f'Embedding(molecule_size={self.molecule_size})'
 
     def initialize(self, qmatoms, mmatoms):
         """Hook up embedding object to QM and MM atoms objects."""
@@ -323,7 +326,7 @@ def combine_lj_lorenz_berthelot(sigmaqm, sigmamm,
     sigma = []
     epsilon = []
     # check if input is tuple of vals for more than 1 mm calc, or only for 1.
-    if type(sigmamm) == tuple:
+    if isinstance(sigmamm, Sequence):
         numcalcs = len(sigmamm)
     else:
         numcalcs = 1  # if only 1 mm calc, eps and sig are simply np arrays
@@ -351,7 +354,7 @@ class LJInteractionsGeneral:
 
     def __init__(self, sigmaqm, epsilonqm, sigmamm, epsilonmm,
                  qm_molecule_size, mm_molecule_size=3,
-                 rc=np.Inf, width=1.0):
+                 rc=np.inf, width=1.0):
         """General Lennard-Jones type explicit interaction.
 
         sigmaqm: array

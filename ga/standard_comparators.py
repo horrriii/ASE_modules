@@ -1,4 +1,5 @@
 import numpy as np
+
 from ase.ga import get_raw_score
 
 
@@ -7,7 +8,7 @@ def get_sorted_dist_list(atoms, mic=False):
         describing the cluster in atoms. """
     numbers = atoms.numbers
     unique_types = set(numbers)
-    pair_cor = dict()
+    pair_cor = {}
     for n in unique_types:
         i_un = [i for i in range(len(atoms)) if atoms[i].number == n]
         d = []
@@ -80,7 +81,7 @@ class InteratomicDistanceComparator:
             d = np.abs(c1 - c2)
             cum_diff = np.sum(d)
             max_diff = np.max(d)
-            ntype = float(sum([i == n for i in numbers]))
+            ntype = float(sum(i == n for i in numbers))
             total_cum_diff += cum_diff / t_size * ntype / float(len(numbers))
         return (total_cum_diff, max_diff)
 
@@ -114,7 +115,7 @@ class SequentialComparator:
                 self.logics.append(l)
 
     def looks_like(self, a1, a2):
-        mdct = dict((logic, []) for logic in self.logics)
+        mdct = {logic: [] for logic in self.logics}
         for m, logic in zip(self.methods, self.logics):
             mdct[logic].append(m)
 

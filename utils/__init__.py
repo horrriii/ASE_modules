@@ -1,27 +1,27 @@
 import errno
 import functools
-import os
 import io
+import os
 import pickle
+import re
+import string
 import sys
 import time
-import string
 import warnings
+from contextlib import ExitStack, contextmanager
 from importlib import import_module
-from math import sin, cos, radians, atan2, degrees
-from contextlib import contextmanager, ExitStack
-from math import gcd
-from pathlib import PurePath, Path
-import re
+from math import atan2, cos, degrees, gcd, radians, sin
+from pathlib import Path, PurePath
+from typing import Callable, Dict, List, Type, Union
 
 import numpy as np
 
 from ase.formula import formula_hill, formula_metal
 
-__all__ = ['exec_', 'basestring', 'import_module', 'seterr', 'plural',
+__all__ = ['basestring', 'import_module', 'seterr', 'plural',
            'devnull', 'gcd', 'convert_string_to_fd', 'Lock',
            'opencew', 'OpenLock', 'rotate', 'irotate', 'pbc2pbc', 'givens',
-           'hsv2rgb', 'hsv', 'pickleload', 'FileNotFoundError',
+           'hsv2rgb', 'hsv', 'pickleload', 'reader',
            'formula_hill', 'formula_metal', 'PurePath', 'xwopen',
            'tokenize_version', 'get_python_package_path_description']
 
@@ -49,19 +49,91 @@ basestring = str
 pickleload = functools.partial(pickle.load, encoding='bytes')
 
 
-def deprecated(msg, category=FutureWarning):
+def deprecated(
+    message: Union[str, Warning],
+    category: Type[Warning] = FutureWarning,
+    callback: Callable[[List, Dict], bool] = lambda args, kwargs: True
+):
     """Return a decorator deprecating a function.
 
-    Use like @deprecated('warning message and explanation')."""
+    Parameters
+    ----------
+    message : str or Warning
+        The message to be emitted. If ``message`` is a Warning, then
+        ``category`` is ignored and ``message.__class__`` will be used.
+    category : Type[Warning], default=FutureWarning
+        The type of warning to be emitted. If ``message`` is a ``Warning``
+        instance, then ``category`` will be ignored and ``message.__class__``
+        will be used.
+    callback : Callable[[List, Dict], bool], default=lambda args, kwargs: True
+        A callable that determines if the warning should be emitted and handles
+        any processing prior to calling the deprecated function. The callable
+        will receive two arguments, a list and a dictionary. The list will
+        contain the positional arguments that the deprecated function was
+        called with at runtime while the dictionary will contain the keyword
+        arguments. The callable *must* return ``True`` if the warning is to be
+        emitted and ``False`` otherwise. The list and dictionary will be
+        unpacked into the positional and keyword arguments, respectively, used
+        to call the deprecated function.
+
+    Returns
+    -------
+    deprecated_decorator : Callable
+        A decorator for deprecated functions that can be used to conditionally
+        emit deprecation warnings and/or pre-process the arguments of a
+        deprecated function.
+
+    Example
+    -------
+    >>> # Inspect & replace a keyword parameter passed to a deprecated function
+    >>> from typing import Any, Callable, Dict, List
+    >>> import warnings
+    >>> from ase.utils import deprecated
+
+    >>> def alias_callback_factory(kwarg: str, alias: str) -> Callable:
+    ...     def _replace_arg(_: List, kwargs: Dict[str, Any]) -> bool:
+    ...         kwargs[kwarg] = kwargs[alias]
+    ...         del kwargs[alias]
+    ...         return True
+    ...     return _replace_arg
+
+    >>> MESSAGE = ("Calling this function with `atoms` is deprecated. "
+    ...            "Use `optimizable` instead.")
+    >>> @deprecated(
+    ...     MESSAGE,
+    ...     category=DeprecationWarning,
+    ...     callback=alias_callback_factory("optimizable", "atoms")
+    ... )
+    ... def function(*, atoms=None, optimizable=None):
+    ...     '''
+    ...     .. deprecated:: 3.23.0
+    ...         Calling this function with ``atoms`` is deprecated.
+    ...         Use ``optimizable`` instead.
+    ...     '''
+    ...     print(f"atoms: {atoms}")
+    ...     print(f"optimizable: {optimizable}")
+
+    >>> with warnings.catch_warnings(record=True) as w:
+    ...     warnings.simplefilter("always")
+    ...     function(atoms="atoms")
+    atoms: None
+    optimizable: atoms
+
+    >>> w[-1].category == DeprecationWarning
+    True
+    """
+
     def deprecated_decorator(func):
         @functools.wraps(func)
         def deprecated_function(*args, **kwargs):
-            warning = msg
-            if not isinstance(warning, Warning):
-                warning = category(warning)
-            warnings.warn(warning)
-            return func(*args, **kwargs)
+            _args = list(args)
+            if callback(_args, kwargs):
+                warnings.warn(message, category=category, stacklevel=2)
+
+            return func(*_args, **kwargs)
+
         return deprecated_function
+
     return deprecated_decorator
 
 
@@ -80,6 +152,8 @@ def seterr(**kwargs):
 
 def plural(n, word):
     """Use plural for n!=1.
+
+    >>> from ase.utils import plural
 
     >>> plural(0, 'egg'), plural(1, 'egg'), plural(2, 'egg')
     ('0 eggs', '1 egg', '2 eggs')
@@ -137,6 +211,9 @@ def convert_string_to_fd(name, world=None):
 
     Will open a file for writing with given name.  Use None for no output and
     '-' for sys.stdout.
+
+    .. deprecated:: 3.22.1
+        Please use e.g. :class:`ase.utils.IOContext` class instead.
     """
     if world is None:
         from ase.parallel import world
@@ -176,8 +253,9 @@ def opencew(filename, world=None):
 
 
 def _opencew(filename, world=None):
+    import ase.parallel as parallel
     if world is None:
-        from ase.parallel import world
+        world = parallel.world
 
     closelater = []
 
@@ -198,7 +276,7 @@ def _opencew(filename, world=None):
             closelater.append(fd)
 
         # Synchronize:
-        error = world.sum(error)
+        error = world.sum_scalar(error)
         if error == errno.EEXIST:
             return None
         if error:
@@ -303,7 +381,7 @@ def search_current_git_hash(arg, world=None):
     HEAD_file = os.path.join(git_dpath, 'HEAD')
     if not os.path.isfile(HEAD_file):
         return None
-    with open(HEAD_file, 'r') as fd:
+    with open(HEAD_file) as fd:
         line = fd.readline().strip()
     if line.startswith('ref: '):
         ref = line[5:]
@@ -313,7 +391,7 @@ def search_current_git_hash(arg, world=None):
         ref_file = HEAD_file
     if not os.path.isfile(ref_file):
         return None
-    with open(ref_file, 'r') as fd:
+    with open(ref_file) as fd:
         line = fd.readline().strip()
     if all(c in string.hexdigits for c in line):
         return line
@@ -395,6 +473,18 @@ def pbc2pbc(pbc):
     return newpbc
 
 
+def string2index(stridx: str) -> Union[int, slice, str]:
+    """Convert index string to either int or slice"""
+    if ':' not in stridx:
+        # may contain database accessor
+        try:
+            return int(stridx)
+        except ValueError:
+            return stridx
+    i = [None if s == '' else int(s) for s in stridx.split(':')]
+    return slice(*i)
+
+
 def hsv2rgb(h, s, v):
     """http://en.wikipedia.org/wiki/HSL_and_HSV
 
@@ -459,7 +549,7 @@ def workdir(path, mkdir=False):
         path.mkdir(parents=True, exist_ok=True)
 
     olddir = os.getcwd()
-    os.chdir(str(path))  # py3.6 allows chdir(path) but we still need 3.5
+    os.chdir(path)
     try:
         yield  # Yield the Path or dirname maybe?
     finally:
@@ -512,7 +602,7 @@ def write_json(self, fd):
     _write_json(fd, self)
 
 
-@classmethod  # type: ignore
+@classmethod  # type: ignore[misc]
 def read_json(cls, fd):
     """Read new instance from JSON file."""
     from ase.io.jsonio import read_json as _read_json
@@ -627,21 +717,20 @@ class IOContext:
     def close(self):
         self._exitstack.close()
 
-    def openfile(self, file, comm=None, mode='w'):
-        from ase.parallel import world
-        if comm is None:
-            comm = world
-
+    def openfile(self, file, comm, mode='w'):
         if hasattr(file, 'close'):
             return file  # File already opened, not for us to close.
 
+        encoding = None if mode.endswith('b') else 'utf-8'
+
         if file is None or comm.rank != 0:
-            return self.closelater(open(os.devnull, mode=mode))
+            return self.closelater(open(os.devnull, mode=mode,
+                                        encoding=encoding))
 
         if file == '-':
             return sys.stdout
 
-        return self.closelater(open(file, mode=mode))
+        return self.closelater(open(file, mode=mode, encoding=encoding))
 
 
 def get_python_package_path_description(
@@ -660,4 +749,4 @@ def get_python_package_path_description(
         else:
             return default
     except Exception as ex:
-        return "{:} ({:})".format(default, ex)
+        return f"{default} ({ex})"

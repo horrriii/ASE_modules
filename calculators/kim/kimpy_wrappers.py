@@ -5,18 +5,59 @@ Daniel S. Karls
 University of Minnesota
 """
 
-from abc import ABC
 import functools
+from abc import ABC
 
 import numpy as np
-import kimpy
 
-from .exceptions import (
-    KIMModelNotFound,
-    KIMModelInitializationError,
-    KimpyError,
-    KIMModelParameterError,
-)
+from .exceptions import (KIMModelInitializationError, KIMModelNotFound,
+                         KIMModelParameterError, KimpyError)
+
+
+class LazyKimpyImport:
+    """This class avoids module level import of the optional kimpy module."""
+
+    def __getattr__(self, attr):
+        return getattr(self._kimpy, attr)
+
+    @functools.cached_property
+    def _kimpy(self):
+        import kimpy
+        return kimpy
+
+
+class Wrappers:
+    """Shortcuts written in a way that avoids module-level kimpy import."""
+
+    @property
+    def collections_create(self):
+        return functools.partial(check_call, kimpy.collections.create)
+
+    @property
+    def model_create(self):
+        return functools.partial(check_call, kimpy.model.create)
+
+    @property
+    def simulator_model_create(self):
+        return functools.partial(check_call, kimpy.simulator_model.create)
+
+    @property
+    def get_species_name(self):
+        return functools.partial(
+            check_call, kimpy.species_name.get_species_name)
+
+    @property
+    def get_number_of_species_names(self):
+        return functools.partial(
+            check_call, kimpy.species_name.get_number_of_species_names)
+
+    @property
+    def collection_item_type_portableModel(self):
+        return kimpy.collection_item_type.portableModel
+
+
+kimpy = LazyKimpyImport()
+wrappers = Wrappers()
 
 # Function used for casting parameter/extent indices to C-compatible ints
 c_int = np.intc
@@ -54,7 +95,7 @@ def check_call(f, *args, **kwargs):
         return f(*args, **kwargs)
     except RuntimeError as e:
         raise KimpyError(
-            f'Calling kimpy function "{f.__name__}" failed:\n  {str(e)}')
+            f'Calling kimpy function "{f.__name__}" failed:\n  {e!s}')
 
 
 def check_call_wrapper(func):
@@ -63,21 +104,6 @@ def check_call_wrapper(func):
         return check_call(func, *args, **kwargs)
 
     return myfunc
-
-
-# kimpy methods
-collections_create = functools.partial(check_call, kimpy.collections.create)
-model_create = functools.partial(check_call, kimpy.model.create)
-simulator_model_create = functools.partial(
-    check_call, kimpy.simulator_model.create)
-get_species_name = functools.partial(
-    check_call, kimpy.species_name.get_species_name)
-get_number_of_species_names = functools.partial(
-    check_call, kimpy.species_name.get_number_of_species_names
-)
-
-# kimpy attributes (here to avoid importing kimpy in higher-level modules)
-collection_item_type_portableModel = kimpy.collection_item_type.portableModel
 
 
 class ModelCollections:
@@ -91,7 +117,7 @@ class ModelCollections:
     """
 
     def __init__(self):
-        self.collection = collections_create()
+        self.collection = wrappers.collections_create()
 
     def __enter__(self):
         return self
@@ -127,7 +153,7 @@ class PortableModel:
         self.debug = debug
 
         # Create KIM API Model object
-        units_accepted, self.kim_model = model_create(
+        units_accepted, self.kim_model = wrappers.model_create(
             kimpy.numbering.zeroBased,
             kimpy.length_unit.A,
             kimpy.energy_unit.eV,
@@ -146,11 +172,11 @@ class PortableModel:
             l_unit, e_unit, c_unit, te_unit, ti_unit = check_call(
                 self.kim_model.get_units
             )
-            print("Length unit is: {}".format(l_unit))
-            print("Energy unit is: {}".format(e_unit))
-            print("Charge unit is: {}".format(c_unit))
-            print("Temperature unit is: {}".format(te_unit))
-            print("Time unit is: {}".format(ti_unit))
+            print(f"Length unit is: {l_unit}")
+            print(f"Energy unit is: {e_unit}")
+            print(f"Charge unit is: {c_unit}")
+            print(f"Temperature unit is: {te_unit}")
+            print(f"Time unit is: {ti_unit}")
             print()
 
         self._create_parameters()
@@ -210,10 +236,10 @@ class PortableModel:
         """
         species = []
         codes = []
-        num_kim_species = get_number_of_species_names()
+        num_kim_species = wrappers.get_number_of_species_names()
 
         for i in range(num_kim_species):
-            species_name = get_species_name(i)
+            species_name = wrappers.get_species_name(i)
 
             species_is_supported, code = self.get_species_support_and_code(
                 species_name)
@@ -574,7 +600,7 @@ class ComputeArguments:
         kimpy_arg_name = kimpy.compute_argument_name
         num_arguments = kimpy_arg_name.get_number_of_compute_argument_names()
         if self.debug:
-            print("Number of compute_args: {}".format(num_arguments))
+            print(f"Number of compute_args: {num_arguments}")
 
         for i in range(num_arguments):
             name = check_call(kimpy_arg_name.get_compute_argument_name, i)
@@ -600,7 +626,7 @@ class ComputeArguments:
                     and name != kimpy.compute_argument_name.partialForces
                 ):
                     raise KIMModelInitializationError(
-                        "Unsupported required ComputeArgument {}".format(name)
+                        f"Unsupported required ComputeArgument {name}"
                     )
 
         # Check compute callbacks
@@ -608,7 +634,7 @@ class ComputeArguments:
         num_callbacks = callback_name.get_number_of_compute_callback_names()
         if self.debug:
             print()
-            print("Number of callbacks: {}".format(num_callbacks))
+            print(f"Number of callbacks: {num_callbacks}")
 
         for i in range(num_callbacks):
             name = check_call(callback_name.get_compute_callback_name, i)
@@ -625,7 +651,7 @@ class ComputeArguments:
             # Cannot handle any "required" callbacks
             if support_status == kimpy.support_status.required:
                 raise KIMModelInitializationError(
-                    "Unsupported required ComputeCallback: {}".format(name)
+                    f"Unsupported required ComputeCallback: {name}"
                 )
 
     @check_call_wrapper
@@ -689,7 +715,7 @@ class SimulatorModel:
     def __init__(self, model_name):
         # Create a KIM API Simulator Model object for this model
         self.model_name = model_name
-        self.simulator_model = simulator_model_create(self.model_name)
+        self.simulator_model = wrappers.simulator_model_create(self.model_name)
 
         # Need to close template map in order to access simulator
         # model metadata

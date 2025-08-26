@@ -20,18 +20,22 @@
 """
 
 import os
-import time
-import subprocess
 import re
+import subprocess
+import time
 import warnings
+
 import numpy as np
-from ase.geometry import cell_to_cellpar
-from ase.calculators.calculator import (FileIOCalculator, Calculator, equal,
-                                        all_changes, kptdensity2monkhorstpack)
-from ase.calculators.openmx.parameters import OpenMXParameters
+
+from ase.calculators.calculator import (Calculator, FileIOCalculator,
+                                        all_changes, equal,
+                                        kptdensity2monkhorstpack)
 from ase.calculators.openmx.default_settings import default_dictionary
-from ase.calculators.openmx.reader import read_openmx, get_file_name
+from ase.calculators.openmx.parameters import OpenMXParameters
+from ase.calculators.openmx.reader import get_file_name, read_openmx
 from ase.calculators.openmx.writer import write_openmx
+from ase.config import cfg
+from ase.geometry import cell_to_cellpar
 
 
 def parse_omx_version(txt):
@@ -116,8 +120,8 @@ class OpenMX(FileIOCalculator):
             for key in pbs:
                 if key not in self.default_pbs:
                     allowed = ', '.join(list(self.default_pbs.keys()))
-                    raise TypeError('Unexpected keyword "{0}" in "pbs" '
-                                    'dictionary.  Must be one of: {1}'
+                    raise TypeError('Unexpected keyword "{}" in "pbs" '
+                                    'dictionary.  Must be one of: {}'
                                     .format(key, allowed))
             # Put dictionary into python variable
             self.pbs.update(pbs)
@@ -131,8 +135,8 @@ class OpenMX(FileIOCalculator):
             for key in mpi:
                 if key not in self.default_mpi:
                     allowed = ', '.join(list(self.default_mpi.keys()))
-                    raise TypeError('Unexpected keyword "{0}" in "mpi" '
-                                    'dictionary.  Must be one of: {1}'
+                    raise TypeError('Unexpected keyword "{}" in "mpi" '
+                                    'dictionary.  Must be one of: {}'
                                     .format(key, allowed))
             # Put dictionary into python variable
             self.mpi.update(mpi)
@@ -244,9 +248,9 @@ class OpenMX(FileIOCalculator):
         bashArgs = "#!/bin/bash \n cd $PBS_O_WORKDIR\n"
         jobName = prefix
         cmd = bashArgs + \
-            'mpirun -hostfile $PBS_NODEFILE openmx %s > %s' % (
+            'mpirun -hostfile $PBS_NODEFILE openmx {} > {}'.format(
                 inputfile, outfile)
-        echoArgs = ["echo", "$' %s'" % cmd]
+        echoArgs = ["echo", f"$' {cmd}'"]
         qsubArgs = ["qsub", "-N", jobName, "-l", "nodes=%d:ppn=%d" %
                     (nodes, processes), "-l", "walltime=" + self.walltime]
         wholeCmd = " ".join(echoArgs) + " | " + " ".join(qsubArgs)
@@ -305,7 +309,7 @@ class OpenMX(FileIOCalculator):
         See base FileIOCalculator for documentation.
         """
         if self.parameters.data_path is None:
-            if 'OPENMX_DFT_DATA_PATH' not in os.environ:
+            if 'OPENMX_DFT_DATA_PATH' not in cfg:
                 warnings.warn('Please either set OPENMX_DFT_DATA_PATH as an'
                               'enviroment variable or specify "data_path" as'
                               'a keyword argument')
@@ -331,7 +335,7 @@ class OpenMX(FileIOCalculator):
             # self.clean()
         except RuntimeError as e:
             try:
-                with open(get_file_name('.log'), 'r') as fd:
+                with open(get_file_name('.log')) as fd:
                     lines = fd.readlines()
                 debug_lines = 10
                 print('##### %d last lines of the OpenMX output' % debug_lines)
@@ -370,7 +374,7 @@ class OpenMX(FileIOCalculator):
         self.prind('Reading input file' + self.label)
         filename = get_file_name('.dat', self.label)
         if not nohup:
-            with open(filename, 'r') as fd:
+            with open(filename) as fd:
                 while True:
                     line = fd.readline()
                     print(line.strip())
@@ -393,7 +397,7 @@ class OpenMX(FileIOCalculator):
         version = None
         if label is None:
             label = self.label
-        for line in open(get_file_name('.out', label)):
+        for line in open(get_file_name('.log', label)):
             if line.find('Ver.') != -1:
                 version = line.split()[-1]
                 break
@@ -412,18 +416,17 @@ class OpenMX(FileIOCalculator):
 
         for key, value in kwargs.items():
             if key not in self.default_parameters.keys():
-                raise KeyError('Unkown keyword "%s" and value "%s".' %
-                               (key, value))
+                raise KeyError(f'Unkown keyword "{key}" and value "{value}".')
             if key == 'xc' and value not in self.default_parameters.allowed_xc:
-                raise KeyError('Given xc "%s" is not allowed' % value)
+                raise KeyError(f'Given xc "{value}" is not allowed')
             if key in ['dat_arguments'] and isinstance(value, dict):
                 # For values that are dictionaries, verify subkeys, too.
                 default_dict = self.default_parameters[key]
                 for subkey in kwargs[key]:
                     if subkey not in default_dict:
                         allowed = ', '.join(list(default_dict.keys()))
-                        raise TypeError('Unknown subkeyword "{0}" of keyword '
-                                        '"{1}".  Must be one of: {2}'
+                        raise TypeError('Unknown subkeyword "{}" of keyword '
+                                        '"{}".  Must be one of: {}'
                                         .format(subkey, key, allowed))
 
         # Find out what parameter has been changed
@@ -447,8 +450,8 @@ class OpenMX(FileIOCalculator):
         value = kwargs.get('energy_cutoff')
         if value is not None and not (isinstance(value, (float, int))
                                       and value > 0):
-            mess = "'%s' must be a positive number(in eV), \
-                got '%s'" % ('energy_cutoff', value)
+            mess = "'{}' must be a positive number(in eV), \
+                got '{}'".format('energy_cutoff', value)
             raise ValueError(mess)
 
         atoms = kwargs.get('atoms')
@@ -468,7 +471,7 @@ class OpenMX(FileIOCalculator):
             self.command = 'openmx'
         # run processes specified by the system variable OPENMX_COMMAND
         if processes is None:
-            command += os.environ.get('OPENMX_COMMAND')
+            command += cfg.get('OPENMX_COMMAND')
             if command is None:
                 warnings.warn('Either specify OPENMX_COMMAND as an environment\
                 variable or specify processes as a keyword argument')
@@ -482,9 +485,9 @@ class OpenMX(FileIOCalculator):
             # str(processes) + ' openmx %s' + threads_string + ' > %s'
 
         if runfile is None:
-            runfile = abs_dir + '/' + self.prefix + '.dat'
+            runfile = os.path.join(abs_dir, f'{self.prefix} .dat')
         if outfile is None:
-            outfile = abs_dir + '/' + self.prefix + '.log'
+            outfile = os.path.join(abs_dir, f'{self.prefix} .log')
         try:
             command = command % (runfile, outfile)
             # command += '" > ./%s &' % outfile  # outputs
@@ -494,7 +497,7 @@ class OpenMX(FileIOCalculator):
                 "be a format string" +
                 " with four string arguments.\n" +
                 "Example : 'mpirun -np 4 openmx ./%s -nt 2 > ./%s'.\n" +
-                "Got '%s'" % command)
+                f"Got '{command}'")
         return command
 
     def get_stress(self, atoms=None):
@@ -548,7 +551,7 @@ class OpenMX(FileIOCalculator):
             for i, kpath in enumerate(band_kpath):
                 end = False
                 nband = int(kpath[0])
-                if(band_nkpath == i):
+                if band_nkpath == i:
                     end = True
                     nband += 1
                 ini = np.array(kpath[1:4], dtype=float)
@@ -579,7 +582,7 @@ class OpenMX(FileIOCalculator):
         abc = cellpar[:3]
         angles = cellpar[3:]
         min_lv = min(abc)
-        if abc.ptp() < 0.01 * min_lv:
+        if np.ptp(abc) < 0.01 * min_lv:
             if abs(angles - 90).max() < 1:
                 return 'cubic'
             elif abs(angles - 60).max() < 1:
@@ -696,9 +699,9 @@ class OpenMX(FileIOCalculator):
         prev_position = 0
         last_position = 0
         while not os.path.isfile(file):
-            self.prind('Waiting for %s to come out' % file)
+            self.prind(f'Waiting for {file} to come out')
             time.sleep(5)
-        with open(file, 'r') as fd:
+        with open(file) as fd:
             while running(**args):
                 fd.seek(last_position)
                 new_data = fd.read()

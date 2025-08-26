@@ -1,9 +1,12 @@
-from ase.build import fcc100, add_adsorbate
-from ase.constraints import FixAtoms
+import pytest
+
+from ase.build import add_adsorbate, fcc100
 from ase.calculators.emt import EMT
-from ase.dimer import DimerControl, MinModeAtoms, MinModeTranslate
+from ase.constraints import FixAtoms
+from ase.mep import DimerControl, MinModeAtoms, MinModeTranslate
 
 
+@pytest.mark.optimize()
 def test_dimer_method(testdir):
     # Set up a small "slab" with an adatoms
     atoms = fcc100('Pt', size=(2, 2, 1), vacuum=10.0)
@@ -35,7 +38,7 @@ def test_dimer_method(testdir):
 
     # Test the results
     tolerance = 1e-3
-    assert(d_atoms.get_barrier_energy() - 1.03733136918 < tolerance)
-    assert(abs(d_atoms.get_curvature() + 0.900467048707) < tolerance)
-    assert(d_atoms.get_eigenmode()[-1][1] < -0.99)
-    assert(abs(d_atoms.get_positions()[-1][1]) < tolerance)
+    assert d_atoms.get_barrier_energy() - 1.03733136918 < tolerance
+    assert abs(d_atoms.get_curvature() + 0.900467048707) < tolerance
+    assert d_atoms.get_eigenmode()[-1][1] < -0.99
+    assert abs(d_atoms.get_positions()[-1][1]) < tolerance
